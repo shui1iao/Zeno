@@ -688,7 +688,7 @@ class InstallSafetyTest(unittest.TestCase):
         self.assertIn('platforms: linux/amd64,linux/arm64,linux/arm/v6', workflow)
         self.assertIn('docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8', workflow)
         self.assertIn('docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a', workflow)
-        self.assertIn('actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0', workflow)
+        self.assertIn('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', workflow)
         self.assertIn('actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e', workflow)
         self.assertIn('actions/setup-node@820762786026740c76f36085b0efc47a31fe5020', workflow)
         self.assertIn('golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f', workflow)

@@ -116,9 +116,8 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Go module golang.org/x/crypto@v0.52.0 (LICENSE)
-Go module golang.org/x/exp@v0.0.0-20251023183803-a4bb9ffd2546 (LICENSE)
-Go module golang.org/x/sys@v0.45.0 (LICENSE)
+Go module golang.org/x/crypto@v0.54.0 (LICENSE)
+Go module golang.org/x/sys@v0.47.0 (LICENSE)
 ------------------------------------------------------------------------------
 Copyright 2009 The Go Authors.
 
@@ -149,7 +148,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Go module modernc.org/libc@v1.67.6 (LICENSE)
+Go module modernc.org/libc@v1.74.1 (LICENSE)
 ------------------------------------------------------------------------------
 Copyright (c) 2017 The Libc Authors. All rights reserved.
 
@@ -180,7 +179,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Go module modernc.org/libc@v1.67.6 (LICENSE-3RD-PARTY.md)
+Go module modernc.org/libc@v1.74.1 (LICENSE-3RD-PARTY.md)
 ------------------------------------------------------------------------------
 # Third-Party Software Notices
 
@@ -615,7 +614,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Go module modernc.org/sqlite@v1.45.0 (LICENSE)
+Go module modernc.org/sqlite@v1.54.0 (LICENSE)
 ------------------------------------------------------------------------------
 Copyright (c) 2017 The Sqlite Authors. All rights reserved.
 
