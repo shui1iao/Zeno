@@ -148,7 +148,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Go module modernc.org/libc@v1.74.1 (LICENSE)
+Go module modernc.org/libc@v1.74.4 (LICENSE)
 ------------------------------------------------------------------------------
 Copyright (c) 2017 The Libc Authors. All rights reserved.
 
@@ -179,7 +179,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Go module modernc.org/libc@v1.74.1 (LICENSE-3RD-PARTY.md)
+Go module modernc.org/libc@v1.74.4 (LICENSE-3RD-PARTY.md)
 ------------------------------------------------------------------------------
 # Third-Party Software Notices
 
@@ -614,7 +614,7 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ==============================================================================
-Go module modernc.org/sqlite@v1.54.0 (LICENSE)
+Go module modernc.org/sqlite@v1.56.0 (LICENSE)
 ------------------------------------------------------------------------------
 Copyright (c) 2017 The Sqlite Authors. All rights reserved.
 
