@@ -694,8 +694,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-npm package react-dom@19.2.7 (LICENSE)
-npm package react@19.2.7 (LICENSE)
+npm package react-dom@19.2.8 (LICENSE)
+npm package react@19.2.8 (LICENSE)
 npm package scheduler@0.27.0 (LICENSE)
 ------------------------------------------------------------------------------
 MIT License
