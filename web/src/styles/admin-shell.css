@@ -20,10 +20,8 @@
 }
 .admin-chrome-card .admin-section-nav {
   width: 100%;
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--slider-columns), minmax(0, 1fr));
 }
-.admin-chrome-card .admin-section-nav button { min-height: 36px; }
 .admin-container,
 .admin-container .home-top-card.admin-panel { width: 100%; }
 .admin-panel--login { min-height: min(760px, calc(100dvh - 72px)); display: flex; flex-direction: column; }
@@ -122,38 +120,16 @@
   justify-content: space-between;
   gap: 12px;
 }
-.admin-section-nav {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  background: transparent;
-  box-shadow: none;
-}
 .admin-section-nav button {
-  --admin-nav-accent: var(--blue);
-  min-width: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0;
-  padding: 9px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-field);
-  background: transparent;
   color: color-mix(in srgb, var(--foreground) 72%, transparent);
   text-align: center;
-  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
 }
-.admin-section-nav button:nth-child(1) { --admin-nav-accent: var(--blue); }
-.admin-section-nav button:nth-child(2) { --admin-nav-accent: var(--purple); }
-.admin-section-nav button:nth-child(3) { --admin-nav-accent: var(--green); }
-.admin-section-nav button:nth-child(4) { --admin-nav-accent: var(--orange); }
-.admin-section-nav button:nth-child(5) { --admin-nav-accent: #0ea5e9; }
-.admin-section-nav button:hover { border-color: color-mix(in srgb, var(--admin-nav-accent) 48%, var(--border)); background: transparent; color: var(--admin-nav-accent); }
-.admin-section-nav button[data-active='true'] { border-color: var(--admin-nav-accent); background: transparent; color: var(--admin-nav-accent); box-shadow: none; }
+.admin-section-nav button:hover { background: transparent; color: var(--foreground); }
+.admin-section-nav button[data-active='true'] { background: transparent; color: #fff; box-shadow: none; }
 .admin-section-nav span { font-size: 15px; font-weight: 500; }
 @media (max-width: 767px) {
   .home-overview-card,
@@ -166,9 +142,7 @@
   .admin-panel--login { min-height: calc(100dvh - 28px); }
   .admin-login-card { grid-template-columns: 1fr; align-items: stretch; padding: 20px 16px; gap: 18px; }
   .admin-toolbar { flex-direction: column; align-items: stretch; }
-  .admin-chrome-card .admin-section-nav { width: 100%; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding: 2px; border-radius: var(--radius-card); overflow: hidden; }
-  .admin-chrome-card .admin-section-nav button { min-width: 0; min-height: 38px; padding: 0 2px; border-radius: var(--radius-field); }
-  .admin-chrome-card .admin-section-nav button:last-child { grid-column: auto; }
+  .admin-chrome-card .admin-section-nav button { height: 24px; padding: 0 2px; }
   .admin-section-nav span { font-size: 11px; white-space: nowrap; }
   .admin-state-card { min-height: 84px; margin-top: 18px; padding: 16px; }
 }

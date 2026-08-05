@@ -325,8 +325,8 @@ func TestLatencyGridPointsPropagatesQueryErrors(t *testing.T) {
 		t.Fatalf("open sqlite store: %v", err)
 	}
 	seedLatencyGridFixture(ctx, t, closedStore, window)
-	if err := closedStore.db.Close(); err != nil {
-		t.Fatalf("close db: %v", err)
+	if err := closedStore.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
 	}
 	if _, err := closedStore.latencyGridPoints(ctx, "node-a", window); err == nil {
 		t.Fatal("expected error from closed db on latency grid")

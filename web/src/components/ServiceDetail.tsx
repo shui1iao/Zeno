@@ -2,6 +2,7 @@ import { type ReactNode, useState } from 'react'
 import { availableHistoryRanges } from '../lib/historyRange'
 import type { LatencyPoint, ServiceTarget } from '../types'
 import { LatencyChart } from './LatencyChart'
+import { HistoryRangeSelector } from './HistoryRangeSelector'
 
 export interface ServiceDetailProps {
   target: ServiceTarget
@@ -25,13 +26,13 @@ export function ServiceDetail({ target, points, range, loading, error, canUseExt
         {topHeader}
         <section className="detail-hero">
           <div className="detail-hero__main">
-          <button className="detail-title-button" type="button" onClick={onBack}>
-            <span aria-hidden="true">‹</span>
-            <span>{target.name}</span>
-          </button>
-          <span className={`detail-status-pill status-${serviceTone(target)}`}>{target.reportingNodeCount} / {target.assignedNodeCount} 节点上报</span>
-        </div>
-          <section className="detail-fact-strip" aria-label={`${target.name} service facts`}>
+            <button className="detail-title-button" type="button" onClick={onBack}>
+              <span aria-hidden="true">‹</span>
+              <span>{target.name}</span>
+            </button>
+            <span className={`detail-status-pill status-${serviceTone(target)}`}>{target.reportingNodeCount} / {target.assignedNodeCount} 节点上报</span>
+          </div>
+          <section className="detail-fact-strip detail-fact-strip--service" aria-label={`${target.name} service facts`}>
             <ServiceInfoFact label="类型" value={target.type} />
             <ServiceInfoFact label="最新延迟" value={formatServiceLatency(target.avgMs)} />
             <ServiceInfoFact label="丢包" value={formatServiceLoss(target.lossPercent)} />
@@ -47,11 +48,12 @@ export function ServiceDetail({ target, points, range, loading, error, canUseExt
             <p>{rangeLabel} · 按节点分线展示</p>
           </div>
           <div className="monitor-heading-actions">
-            <div className="detail-range-row" aria-label="service latency range selector">
-              {serviceRangeOptions.map((option) => (
-                <button key={option.value} type="button" className={range === option.value ? 'is-active' : ''} onClick={() => onRangeChange(option.value)}>{option.label}</button>
-              ))}
-            </div>
+            <HistoryRangeSelector
+              ariaLabel="service latency range selector"
+              options={serviceRangeOptions}
+              value={range}
+              onChange={onRangeChange}
+            />
             <label className="peak-switch">
               <input type="checkbox" aria-label="平滑" checked={peakCut} onChange={(event) => setPeakCut(event.target.checked)} />
               <span />
@@ -70,9 +72,9 @@ export function ServiceDetail({ target, points, range, loading, error, canUseExt
   )
 }
 
-function ServiceInfoFact({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+function ServiceInfoFact({ label, value }: { label: string; value: string }) {
   return (
-    <article className={`detail-fact${wide ? ' is-wide' : ''}`} title={`${label}: ${value}`}>
+    <article className="detail-fact" title={`${label}: ${value}`}>
       <p>{label}</p>
       <strong>{value}</strong>
     </article>

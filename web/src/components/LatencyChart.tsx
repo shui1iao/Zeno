@@ -21,8 +21,8 @@ interface LatencyChartProps {
   activeTargetIds?: string[]
 }
 
-const desktopLayout = { width: 960, height: 320, lineStrokeWidth: 1, pad: { left: 52, right: 24, top: 24, bottom: 44 } }
-const mobileLayout = { width: 400, height: 300, lineStrokeWidth: 1, pad: { left: 46, right: 16, top: 22, bottom: 44 } }
+const desktopLayout = { width: 960, height: 360, lineStrokeWidth: 1, pad: { left: 52, right: 24, top: 24, bottom: 44 } }
+const mobileLayout = { width: 400, height: 320, lineStrokeWidth: 1, pad: { left: 46, right: 16, top: 22, bottom: 44 } }
 const palette = ['#22c55e', '#38bdf8', '#f59e0b', '#a78bfa', '#fb7185', '#14b8a6', '#84cc16', '#f97316', '#06b6d4', '#e879f9']
 const packetLossColor = '#94a3b8'
 const maxDrawableLatencyMs = 5000

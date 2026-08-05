@@ -6,6 +6,7 @@ import AdminOperationalWorkspace, { type AdminOperationalWorkspaceProps } from '
 import { AdminModuleErrorBoundary, AdminOperationalWorkspaceLoadError } from './AdminDashboardBoundary'
 import AdminSettingsSection from './AdminSettingsSection'
 import { defaultSettings } from '../../lib/appearance'
+import { slidingSelectorStyle } from '../../lib/slidingSelector'
 import type { AdminNode, AdminNodeInstallCommand, AdminSettings, AdminTheme } from '../../types'
 import type { AdminAuthState, AdminLoadState } from '../../lib/adminModel'
 import { useAdminController } from '../../hooks/useAdminController'
@@ -247,8 +248,9 @@ export function AdminDashboard({
 }
 
 function AdminSectionNav({ activeSection, onSectionChange }: { activeSection: AdminSection; onSectionChange: (section: AdminSection) => void }) {
+  const activeIndex = Math.max(0, adminSections.findIndex((section) => section.id === activeSection))
   return (
-    <nav className="admin-section-nav" aria-label="后台导航">
+    <nav className="sliding-selector admin-section-nav" aria-label="后台导航" style={slidingSelectorStyle(adminSections.length, activeIndex)}>
       {adminSections.map((section) => (
         <button
           key={section.id}

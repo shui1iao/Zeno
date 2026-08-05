@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { defaultSettings, fallbackLogoUrl, resolvedTheme, themeOptions } from '../lib/appearance'
 import type { AdminSettings, AdminTheme } from '../types'
 
@@ -13,6 +14,22 @@ export interface DashboardHeaderProps {
   onThemeChange?: (theme: AdminTheme) => void
   onBackgroundToggle?: () => void
   backgroundEnabled?: boolean
+}
+
+interface ThemeMenuPosition {
+  top: number
+  left: number
+}
+
+const themeMenuWidth = 128
+const themeMenuMargin = 8
+
+function resolveThemeMenuPosition(button: HTMLButtonElement, viewportWidth: number): ThemeMenuPosition {
+  const rect = button.getBoundingClientRect()
+  return {
+    top: rect.bottom + themeMenuMargin,
+    left: Math.max(themeMenuMargin, Math.min(viewportWidth - themeMenuWidth - themeMenuMargin, rect.right - themeMenuWidth)),
+  }
 }
 
 function BrandLogo({ logoUrl, siteTitle }: { logoUrl?: string; siteTitle?: string }) {
@@ -47,7 +64,10 @@ function BrandLogo({ logoUrl, siteTitle }: { logoUrl?: string; siteTitle?: strin
 
 export function DashboardHeader({ settings = defaultSettings, onHome, onAdmin, onAdminIntent, adminLabel = '后台', leadingAction, trailingAction, onThemeChange, onBackgroundToggle, backgroundEnabled = false }: DashboardHeaderProps) {
   const [themeMenuOpen, setThemeMenuOpen] = useState(false)
+  const [themeMenuPosition, setThemeMenuPosition] = useState<ThemeMenuPosition | null>(null)
   const themeMenuRef = useRef<HTMLDivElement>(null)
+  const themeButtonRef = useRef<HTMLButtonElement>(null)
+  const themePopoverRef = useRef<HTMLDivElement>(null)
   const themeMode = settings.theme
   const currentTheme = resolvedTheme(themeMode)
   const currentThemeLabel = themeOptions.find((option) => option.value === themeMode)?.label ?? '跟随系统'
@@ -55,26 +75,55 @@ export function DashboardHeader({ settings = defaultSettings, onHome, onAdmin, o
     ? (backgroundEnabled ? '关闭背景图' : '开启背景图')
     : (backgroundEnabled ? '背景图加载中' : '背景图未配置')
 
+  const closeThemeMenu = useCallback((restoreFocus = false) => {
+    setThemeMenuOpen(false)
+    setThemeMenuPosition(null)
+    if (restoreFocus && typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => themeButtonRef.current?.focus())
+    }
+  }, [])
+
   useEffect(() => {
     if (!themeMenuOpen || typeof window === 'undefined') return undefined
     const handlePointerDown = (event: PointerEvent) => {
       if (themeMenuRef.current?.contains(event.target as Node)) return
-      setThemeMenuOpen(false)
+      if (themePopoverRef.current?.contains(event.target as Node)) return
+      closeThemeMenu()
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setThemeMenuOpen(false)
+      if (event.key === 'Escape') closeThemeMenu(true)
     }
+    const updatePosition = () => {
+      const button = themeButtonRef.current
+      if (!button) return
+      setThemeMenuPosition(resolveThemeMenuPosition(button, window.innerWidth))
+    }
+    updatePosition()
     window.addEventListener('pointerdown', handlePointerDown)
     window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
     return () => {
       window.removeEventListener('pointerdown', handlePointerDown)
       window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
     }
-  }, [themeMenuOpen])
+  }, [closeThemeMenu, themeMenuOpen])
 
   const selectTheme = (nextTheme: AdminTheme) => {
     onThemeChange?.(nextTheme)
-    setThemeMenuOpen(false)
+    closeThemeMenu(true)
+  }
+
+  const toggleThemeMenu = () => {
+    if (themeMenuOpen) {
+      closeThemeMenu()
+      return
+    }
+    const button = themeButtonRef.current
+    if (button) setThemeMenuPosition(resolveThemeMenuPosition(button, window.innerWidth))
+    setThemeMenuOpen(true)
   }
 
   return (
@@ -86,21 +135,22 @@ export function DashboardHeader({ settings = defaultSettings, onHome, onAdmin, o
       <nav className="nav-actions" aria-label="dashboard actions">
         {leadingAction}
         <div className="theme-menu" ref={themeMenuRef}>
-          <button className="nav-icon-button" type="button" aria-label={`主题：${currentThemeLabel}`} aria-haspopup="menu" aria-expanded={themeMenuOpen} onClick={() => setThemeMenuOpen((open) => !open)}>{themeMode === 'system' ? <MonitorIcon /> : currentTheme === 'dark' ? <MoonIcon /> : <SunIcon />}<span className="sr-only">切换深浅色</span></button>
-          {themeMenuOpen && (
-            <div className="theme-menu-popover" role="menu">
-              {themeOptions.map((option) => (
-                <button key={option.value} type="button" role="menuitemradio" aria-checked={themeMode === option.value} data-active={themeMode === option.value} onClick={() => selectTheme(option.value)}>
-                  <span>{option.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          <button ref={themeButtonRef} className="nav-icon-button" type="button" aria-label={`主题：${currentThemeLabel}`} aria-haspopup="menu" aria-expanded={themeMenuOpen} onClick={toggleThemeMenu}>{themeMode === 'system' ? <MonitorIcon /> : currentTheme === 'dark' ? <MoonIcon /> : <SunIcon />}<span className="sr-only">切换深浅色</span></button>
         </div>
         <button className={`nav-icon-button${backgroundEnabled ? ' is-solid' : ''}`} type="button" aria-label={backgroundControlLabel} aria-pressed={backgroundEnabled} disabled={!onBackgroundToggle} onClick={onBackgroundToggle}><ImageMinusIcon /><span className="sr-only">开关背景图</span></button>
         <button className="login-link" type="button" onPointerEnter={onAdminIntent} onPointerDown={onAdminIntent} onFocus={onAdminIntent} onClick={onAdmin}>{adminLabel}</button>
         {trailingAction}
       </nav>
+      {themeMenuOpen && themeMenuPosition && typeof document !== 'undefined' && createPortal(
+        <div ref={themePopoverRef} className={`theme-menu-popover${settings.appearancePreset === 'gaussian_blur' && backgroundEnabled ? ' is-gaussian' : ''}`} role="menu" style={themeMenuPosition}>
+          {themeOptions.map((option) => (
+            <button key={option.value} type="button" role="menuitemradio" aria-checked={themeMode === option.value} data-active={themeMode === option.value} onClick={() => selectTheme(option.value)}>
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
     </header>
   )
 }

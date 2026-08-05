@@ -20,7 +20,8 @@ describe('admin login surface and top-card alignment', () => {
   })
 
   it('keeps the phone admin navigation on one five-column row', () => {
-    expect(adminShellStyles).toMatch(/@media \(max-width: 767px\)\s*\{[\s\S]*?\.admin-chrome-card \.admin-section-nav\s*\{[^}]*grid-template-columns: repeat\(5, minmax\(0, 1fr\)\);[^}]*gap: 2px;[^}]*\}/)
-    expect(adminShellStyles).toContain('.admin-chrome-card .admin-section-nav button:last-child { grid-column: auto; }')
+    expect(adminShellStyles).toMatch(/\.admin-chrome-card \.admin-section-nav\s*\{[^}]*width: 100%;[^}]*grid-template-columns: repeat\(var\(--slider-columns\), minmax\(0, 1fr\)\);[^}]*\}/)
+    expect(adminShellStyles).toMatch(/@media \(max-width: 767px\)\s*\{[\s\S]*?\.admin-chrome-card \.admin-section-nav button\s*\{[^}]*height: 24px;[^}]*padding: 0 2px;[^}]*\}/)
+    expect(adminShellStyles).not.toContain('.admin-chrome-card .admin-section-nav button:last-child')
   })
 })

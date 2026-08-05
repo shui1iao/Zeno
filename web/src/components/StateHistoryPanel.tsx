@@ -2,6 +2,7 @@ import { type MouseEvent, type ReactNode, useMemo, useState } from 'react'
 import type { StatePoint } from '../types'
 import { formatBps, formatBytes, formatPercent } from '../lib/format'
 import { availableHistoryRanges } from '../lib/historyRange'
+import { HistoryRangeSelector } from './HistoryRangeSelector'
 
 interface StateHistoryPanelProps {
   points: StatePoint[]
@@ -140,11 +141,13 @@ export function StateHistoryPanel({ points, range, loading = false, error, canUs
     <section className="monitor-panel resource-history-panel" aria-label="agent state history">
       <header className="resource-history-header">
         <h3>系统资源趋势</h3>
-        <div className="detail-range-row resource-range-row" aria-label="resource history range selector">
-          {stateRangeOptions.map((option) => (
-            <button key={option.value} type="button" className={range === option.value ? 'is-active' : ''} onClick={() => onRangeChange(option.value)}>{option.label}</button>
-          ))}
-        </div>
+        <HistoryRangeSelector
+          ariaLabel="resource history range selector"
+          options={stateRangeOptions}
+          value={range}
+          onChange={onRangeChange}
+          className="resource-range-row"
+        />
       </header>
 
       {loading && <div className="detail-state">正在读取系统资源…</div>}

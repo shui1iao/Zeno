@@ -6,6 +6,7 @@ import { latencySeriesColor, LatencyChart } from './LatencyChart'
 import { ServerFlag } from './ServerFlag'
 import { StateHistoryPanel } from './StateHistoryPanel'
 import { availableHistoryRanges } from '../lib/historyRange'
+import { HistoryRangeSelector } from './HistoryRangeSelector'
 
 interface LatencyDetailProps {
   node: HomeCardNode
@@ -80,16 +81,16 @@ export function LatencyDetail({
         {topHeader}
         <section className="detail-hero">
           <div className="detail-hero__main">
-          <button className="detail-title-button" type="button" onClick={onBack}>
-            <BackIcon />
-            <ServerFlag countryCode={node.countryCode} className="detail-title-flag" />
-            <span>{node.displayName}</span>
-          </button>
-          <div className="detail-hero__badges" aria-label="server live status">
-            <span className={`detail-status-pill status-${visualStatus}`}>{formatStatusLabel(node.status)}</span>
+            <button className="detail-title-button" type="button" onClick={onBack}>
+              <BackIcon />
+              <ServerFlag countryCode={node.countryCode} className="detail-title-flag" />
+              <span>{node.displayName}</span>
+            </button>
+            <div className="detail-hero__badges" aria-label="server live status">
+              <span className={`detail-status-pill status-${visualStatus}`}>{formatStatusLabel(node.status)}</span>
+            </div>
           </div>
-        </div>
-          <section className="detail-fact-strip" aria-label={`${node.displayName} server facts`}>
+          <section className="detail-fact-strip detail-fact-strip--server" aria-label={`${node.displayName} server facts`}>
             <InfoFact label="系统" value={formatSystemSpec(node)} wide />
             <InfoFact label="CPU" value={formatCpuSpec(node)} wide />
             <InfoFact label="内存" value={memoryUsageValue} />
@@ -116,18 +117,12 @@ export function LatencyDetail({
             <p>{showLatencySkeleton ? '同步监控服务…' : `${targetSummaries.length} 个监控服务`}</p>
           </div>
           <div className="monitor-heading-actions">
-            <div className="detail-range-row" aria-label="latency range selector">
-              {rangeOptions.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={range === option.value ? 'is-active' : ''}
-                  onClick={() => onRangeChange(option.value)}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
+            <HistoryRangeSelector
+              ariaLabel="latency range selector"
+              options={rangeOptions}
+              value={range}
+              onChange={onRangeChange}
+            />
           </div>
         </header>
 
