@@ -697,7 +697,7 @@ class InstallSafetyTest(unittest.TestCase):
         ci_workflow = (ROOT / '.github' / 'workflows' / 'ci.yml').read_text()
         dockerfile = (ROOT / 'Dockerfile').read_text()
         policy = (ROOT / 'scripts' / 'check-release-policy.sh').read_text()
-        self.assertIn('actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373', workflow)
+        self.assertIn('actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8', workflow)
         self.assertIn('subject-digest: ${{ steps.build.outputs.digest }}', workflow)
         self.assertIn('push-to-registry: true', workflow)
         self.assertIn('scripts/check-release-policy.sh', workflow)
