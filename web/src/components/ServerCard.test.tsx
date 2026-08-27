@@ -101,6 +101,23 @@ describe('ServerCard', () => {
     expect(html).not.toContain('>占用<')
   })
 
+  it('renders the node capsule as a scoped alternative while reusing the existing metrics and health rows', () => {
+    const html = renderToStaticMarkup(
+      <ServerCard node={baseNode} serverCardTheme="capsule" onOpen={vi.fn()} />,
+    )
+
+    expect(html).toContain('class="kulin-node-card is-capsule status-online"')
+    expect(html).not.toContain('class="node-specs"')
+    expect(html.match(/class="usage-row usage-row--/g)).toHaveLength(4)
+    expect(html.match(/class="usage-row__detail"/g)).toHaveLength(4)
+    expect(html).toMatch(/usage-row--cpu[\s\S]*<strong>12.50%<\/strong>[\s\S]*2 Cores · 0.42 \/ 0.35 \/ 0.28/)
+    expect(html).toMatch(/usage-row--memory[\s\S]*<strong>25.00%<\/strong>[\s\S]*1.00 KB \/ 4.00 KB/)
+    expect(html).toMatch(/usage-row--disk[\s\S]*<strong>25.00%<\/strong>[\s\S]*2.00 KB \/ 8.00 KB/)
+    expect(html).toMatch(/usage-row--traffic[\s\S]*<strong>25.00%<\/strong>[\s\S]*1.00 KB \/ 4.00 KB/)
+    expect(html.match(/class="node-metric /g)).toHaveLength(4)
+    expect(html.match(/class="node-health-metric /g)).toHaveLength(2)
+  })
+
   it('uses one evenly spaced grid for upload, download, expiry, billing, latency and loss', () => {
     const html = renderToStaticMarkup(
       <ServerCard node={{ ...baseNode, renewalAmount: 20, renewalCurrency: 'USD', billingCycle: '年' }} displayCurrency="CNY" exchangeRates={{ CNY: 1, USD: 8 }} onOpen={vi.fn()} />,

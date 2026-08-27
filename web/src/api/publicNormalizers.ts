@@ -14,6 +14,7 @@ export function normalizeSettings(input: ApiSettings): AdminSettings {
     desktopBackgroundUrl,
     mobileBackgroundUrl: input.mobile_background_url ?? '',
     appearancePreset: input.appearance_preset ?? 'default',
+    serverCardTheme: input.server_card_theme === 'capsule' ? 'capsule' : 'classic',
     cardOpacity: input.card_opacity ?? 0.7,
     cardBlur: input.card_blur ?? 0,
     cardRadius: input.card_radius ?? 20,

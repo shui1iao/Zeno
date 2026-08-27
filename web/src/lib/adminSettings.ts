@@ -14,6 +14,7 @@ export function validateAdminSettingsInput(input: AdminSettingsUpdateInput): str
   if (!validSettingsImageURL(input.mobileBackgroundUrl ?? '')) return '手机端背景图 URL 只能是 https:// 链接或 /assets/... 站内路径。'
   if (!validAgentControllerURL(input.agentControllerUrl ?? '')) return 'Agent 接入 URL 必须使用 https://；loopback 或“直接 IP + 显式端口”可使用 http://，且不能包含用户名密码、query 或 fragment。'
   if (input.appearancePreset !== undefined && input.appearancePreset !== 'default' && input.appearancePreset !== 'gaussian_blur') return '外观模板无效。'
+  if (input.serverCardTheme !== undefined && input.serverCardTheme !== 'classic' && input.serverCardTheme !== 'capsule') return '服务器卡片主题无效。'
   if (!validSettingsNumber(input.cardOpacity, 0.2, 1)) return '卡片透明度无效。'
   if (!validSettingsNumber(input.cardBlur, 0, 40)) return '卡片模糊度无效。'
   if (!validSettingsNumber(input.cardRadius, 8, 36)) return '卡片圆角无效。'

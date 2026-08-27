@@ -1,11 +1,12 @@
 import { useEffect, useRef, type ReactNode } from 'react'
-import type { HomeCardNode, HourlyLatencyPoint, NodeStatus } from '../types'
+import type { HomeCardNode, HourlyLatencyPoint, NodeStatus, ServerCardTheme } from '../types'
 import { formatLatency } from '../lib/format'
 import { convertCurrencyAmount, formatCurrencyAmount, normalizeCurrencyCode, normalizeCurrencyRates, type CurrencyCode, type CurrencyRates } from '../lib/currency'
 import { ServerFlag } from './ServerFlag'
 
 interface ServerCardProps {
   node: HomeCardNode
+  serverCardTheme?: ServerCardTheme
   displayCurrency?: CurrencyCode
   exchangeRates?: CurrencyRates
   onOpen?: (nodeId: string) => void
@@ -78,6 +79,11 @@ function formatCores(value: number | null | undefined): string {
 
 function formatUsage(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
+  return value.toFixed(2)
+}
+
+function formatLoad(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '--'
   return value.toFixed(2)
 }
 
@@ -177,7 +183,7 @@ function formatRenewalCost(amount: number | null | undefined, currency: string |
   return `${formatCurrencyAmount(shownAmount, shownCurrency, { spaced: true })}${cycleText ? ` / ${cycleText}` : ''}`
 }
 
-export function ServerCard({ node, displayCurrency = 'CNY', exchangeRates: inputExchangeRates = { CNY: 1 }, onOpen, onIntent }: ServerCardProps) {
+export function ServerCard({ node, serverCardTheme = 'classic', displayCurrency = 'CNY', exchangeRates: inputExchangeRates = { CNY: 1 }, onOpen, onIntent }: ServerCardProps) {
   const memoryPercent = ratio(node.memoryUsedBytes, node.memoryTotalBytes)
   const diskPercent = ratio(node.diskUsedBytes, node.diskTotalBytes)
   const trafficPercent = ratio(node.monthlyBillableBytes, node.monthlyQuotaBytes)
@@ -187,6 +193,8 @@ export function ServerCard({ node, displayCurrency = 'CNY', exchangeRates: input
   const exchangeRates = normalizeCurrencyRates(inputExchangeRates)
   const renewalCost = formatRenewalCost(node.renewalAmount, node.renewalCurrency, node.billingCycle, displayCurrency, exchangeRates)
   const isOfflineCard = isOfflineStatus(node.status)
+  const capsule = serverCardTheme === 'capsule'
+  const capsuleStatus = isOfflineCard ? 'status-offline' : node.status === 'warning' ? 'status-warning' : 'status-online'
   const intentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const open = () => onOpen?.(node.id)
   const clearIntentTimer = () => {
@@ -210,7 +218,7 @@ export function ServerCard({ node, displayCurrency = 'CNY', exchangeRates: input
 
   return (
     <article
-      className={`kulin-node-card${isOfflineCard ? ' is-offline' : ''}`}
+      className={`kulin-node-card${capsule ? ` is-capsule ${capsuleStatus}` : ''}${isOfflineCard ? ' is-offline' : ''}`}
       role={onOpen ? 'link' : undefined}
       tabIndex={onOpen ? 0 : undefined}
       onPointerEnter={scheduleIntent}
@@ -242,18 +250,20 @@ export function ServerCard({ node, displayCurrency = 'CNY', exchangeRates: input
         </span>
       )}
 
-      <section className="node-specs" aria-label={`${node.displayName} specs`}>
-        <SpecIcon kind="cpu" label={formatCores(node.cpuCores)} />
-        <SpecIcon kind="memory" label={formatKulinBytes(node.memoryTotalBytes)} />
-        <SpecIcon kind="disk" label={formatKulinBytes(node.diskTotalBytes)} />
-      </section>
+      {!capsule && (
+        <section className="node-specs" aria-label={`${node.displayName} specs`}>
+          <SpecIcon kind="cpu" label={formatCores(node.cpuCores)} />
+          <SpecIcon kind="memory" label={formatKulinBytes(node.memoryTotalBytes)} />
+          <SpecIcon kind="disk" label={formatKulinBytes(node.diskTotalBytes)} />
+        </section>
+      )}
 
       <section className="node-usage" aria-label={`${node.displayName} usage`}>
         <div className="node-usage-grid">
-          <UsageBar tone="cpu" label="CPU" valueText={`${formatUsage(node.cpuPercent)}%`} percent={node.cpuPercent} />
-          <UsageBar tone="memory" label="内存" valueText={`${formatUsage(memoryPercent)}%`} percent={memoryPercent} />
-          <UsageBar tone="disk" label="存储" valueText={`${formatUsage(diskPercent)}%`} percent={diskPercent} />
-          <UsageBar tone="traffic" label={formatTrafficLabel()} valueText={`${formatKulinBytes(node.monthlyBillableBytes, { compact: true })} / ${formatKulinBytes(node.monthlyQuotaBytes, { compact: true })}`} percent={trafficPercent} />
+          <UsageBar tone="cpu" label="CPU" valueText={`${formatUsage(node.cpuPercent)}%`} percent={node.cpuPercent} detail={capsule ? `${formatCores(node.cpuCores)} · ${formatLoad(node.load1)} / ${formatLoad(node.load5)} / ${formatLoad(node.load15)}` : undefined} />
+          <UsageBar tone="memory" label="内存" valueText={`${formatUsage(memoryPercent)}%`} percent={memoryPercent} detail={capsule ? `${formatKulinBytes(node.memoryUsedBytes)} / ${formatKulinBytes(node.memoryTotalBytes)}` : undefined} />
+          <UsageBar tone="disk" label="存储" valueText={`${formatUsage(diskPercent)}%`} percent={diskPercent} detail={capsule ? `${formatKulinBytes(node.diskUsedBytes)} / ${formatKulinBytes(node.diskTotalBytes)}` : undefined} />
+          <UsageBar tone="traffic" label={formatTrafficLabel()} valueText={capsule ? `${formatUsage(trafficPercent)}%` : `${formatKulinBytes(node.monthlyBillableBytes, { compact: true })} / ${formatKulinBytes(node.monthlyQuotaBytes, { compact: true })}`} percent={trafficPercent} detail={capsule ? `${formatKulinBytes(node.monthlyBillableBytes)} / ${formatKulinBytes(node.monthlyQuotaBytes)}` : undefined} />
         </div>
         <section className="node-footer-grid" aria-label={`${node.displayName} network, billing, and health`}>
           <Metric tone="up" icon={<UploadIcon />} label="上传" value={formatRate(node.netOutSpeedBps)} />
@@ -270,7 +280,7 @@ export function ServerCard({ node, displayCurrency = 'CNY', exchangeRates: input
 
 type ResourceTone = 'cpu' | 'memory' | 'disk' | 'traffic'
 
-function UsageBar({ tone, label, valueText, percent }: { tone: ResourceTone; label: string; valueText: string; percent: number | null | undefined }) {
+function UsageBar({ tone, label, valueText, percent, detail }: { tone: ResourceTone; label: string; valueText: string; percent: number | null | undefined; detail?: string }) {
   const value = clampPercent(percent)
   return (
     <div className={`usage-row usage-row--${tone}`}>
@@ -283,6 +293,7 @@ function UsageBar({ tone, label, valueText, percent }: { tone: ResourceTone; lab
       <div className="usage-track" role="progressbar" aria-label={`${label} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}>
         <div className={`usage-fill is-${barTone(percent)}`} style={{ transform: `translateX(-${100 - value}%)` }} />
       </div>
+      {detail !== undefined && <span className="usage-row__detail">{detail}</span>}
     </div>
   )
 }

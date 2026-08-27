@@ -261,7 +261,7 @@ describe('homepage and admin shell layout', () => {
     expect(styles).toMatch(/\.usage-row\s*\{[^}]*display: flex;[^}]*gap: 6px;[^}]*padding: 6px 0;[^}]*\}/)
     expect(styles).not.toContain('.usage-row + .usage-row')
     expect(styles).toMatch(/\.usage-track\s*\{[^}]*height: 10px;[^}]*\}/)
-    expect(styles).not.toContain('.usage-row__detail')
+    expect(styles).not.toMatch(/^\.usage-row__detail\s*\{/m)
     expect(styles).not.toContain('.usage-row__icon')
     expect(styles).toContain('.usage-row--cpu { --resource-accent: var(--blue); }')
     expect(styles).toContain('.usage-row--memory { --resource-accent: var(--green); }')
@@ -329,6 +329,16 @@ describe('homepage and admin shell layout', () => {
     expect(styles).not.toContain('--gold:')
     expect(styles).toContain('font-weight: 400')
     expect(styles).not.toContain('.home-summary__compact')
+  })
+
+  it('scopes the two-column node capsule treatment to the optional card theme', () => {
+    expect(styles).toMatch(/\.kulin-node-card\.is-capsule\s*\{[^}]*border-left: 0;[^}]*padding-left: 18px;[^}]*\}/)
+    expect(styles).not.toContain('--capsule-status:')
+    expect(styles).toMatch(/\.kulin-node-card\.is-capsule \.usage-row--cpu \.usage-row__detail\s*\{[^}]*font-size: 10px;[^}]*overflow: visible;[^}]*text-overflow: clip;[^}]*\}/)
+    expect(styles).toMatch(/\.kulin-node-card\.is-capsule \.node-usage-grid\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*gap: 10px;[^}]*\}/)
+    expect(styles).toMatch(/\.kulin-node-card\.is-capsule \.usage-row\s*\{[^}]*border: 1px solid color-mix\(in srgb, var\(--resource-accent\) 18%, var\(--border\)\);[^}]*border-radius: var\(--radius-field\);[^}]*\}/)
+    expect(styles).toMatch(/\.kulin-node-card\.is-capsule \.usage-row__detail\s*\{[^}]*display: block;[^}]*text-overflow: ellipsis;[^}]*\}/)
+    expect(styles).not.toMatch(/@media \(max-width: 420px\)[\s\S]*?\.kulin-node-card\.is-capsule \.node-usage-grid\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\);[^}]*\}/)
   })
 
   it('keeps theme and utility popovers legible on their themed translucent surfaces', () => {

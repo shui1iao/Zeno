@@ -51,6 +51,7 @@ func adminSettingsTextBindings(update AdminSettingsUpdateRequest) []adminSetting
 		{settingKeyAgentControllerURL, update.AgentControllerURL},
 		{settingKeyMobileBackgroundURL, update.MobileBackgroundURL},
 		{settingKeyAppearancePreset, update.AppearancePreset},
+		{settingKeyServerCardTheme, update.ServerCardTheme},
 		{settingKeyThemeColor, update.ThemeColor},
 		{settingKeyCustomCode, update.CustomCode},
 	}

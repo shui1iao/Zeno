@@ -95,6 +95,7 @@ describe('fetchSettings', () => {
       desktop_background_url: 'https://example.com/desktop-bg.webp',
       mobile_background_url: 'https://example.com/mobile-bg.webp',
       appearance_preset: 'gaussian_blur',
+      server_card_theme: 'capsule',
       card_opacity: 0.58,
       card_blur: 18,
       card_radius: 24,
@@ -115,6 +116,7 @@ describe('fetchSettings', () => {
     expect(settings.desktopBackgroundUrl).toBe('https://example.com/desktop-bg.webp')
     expect(settings.mobileBackgroundUrl).toBe('https://example.com/mobile-bg.webp')
     expect(settings.appearancePreset).toBe('gaussian_blur')
+    expect((settings as unknown as { serverCardTheme: string }).serverCardTheme).toBe('capsule')
     expect(settings.cardBlur).toBe(18)
     expect(settings.themeColor).toBe('#6366f1')
     expect(settings.customCode).toBe('<style>.home-top-card { border-color: #2563eb; }</style><script>window.ZenoCustomLoaded = true;</script>')
@@ -134,6 +136,7 @@ describe('fetchSettings', () => {
         desktop_background_url: 'https://example.com/desktop-bg.webp',
         mobile_background_url: 'https://example.com/mobile-bg.webp',
         appearance_preset: 'gaussian_blur',
+        server_card_theme: 'capsule',
         card_opacity: 0.58,
         card_blur: 18,
         card_radius: 24,
@@ -159,6 +162,7 @@ describe('fetchSettings', () => {
       desktopBackgroundUrl: 'https://example.com/desktop-bg.webp',
       mobileBackgroundUrl: 'https://example.com/mobile-bg.webp',
       appearancePreset: 'gaussian_blur',
+      serverCardTheme: 'capsule',
       cardOpacity: 0.58,
       cardBlur: 18,
       cardRadius: 24,
@@ -176,6 +180,7 @@ describe('fetchSettings', () => {
     expect(settings.desktopBackgroundUrl).toBe('https://example.com/desktop-bg.webp')
     expect(settings.mobileBackgroundUrl).toBe('https://example.com/mobile-bg.webp')
     expect(settings.appearancePreset).toBe('gaussian_blur')
+    expect((settings as unknown as { serverCardTheme: string }).serverCardTheme).toBe('capsule')
     expect(settings.cardOpacity).toBe(0.58)
     expect(settings.cardBlur).toBe(18)
     expect(settings.cardRadius).toBe(24)
@@ -207,6 +212,7 @@ describe('fetchSettings', () => {
         desktop_background_url: 'https://example.com/desktop-bg.webp',
         mobile_background_url: 'https://example.com/mobile-bg.webp',
         appearance_preset: 'gaussian_blur',
+        server_card_theme: 'capsule',
         card_opacity: 0.58,
         card_blur: 18,
         card_radius: 24,

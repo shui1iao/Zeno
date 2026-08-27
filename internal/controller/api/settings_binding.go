@@ -64,6 +64,8 @@ func siteSettingsBindings() []settingsBinding {
 		{settingKeyMobileBackgroundURL, assignString(func(s *SiteSettings) *string { return &s.MobileBackgroundURL })},
 		{settingKeyAppearancePreset, assignValidatedString(
 			func(s *SiteSettings) *string { return &s.AppearancePreset }, validAppearancePreset)},
+		{settingKeyServerCardTheme, assignValidatedString(
+			func(s *SiteSettings) *string { return &s.ServerCardTheme }, validServerCardTheme)},
 		{settingKeyCardOpacity, assignFloat(func(s *SiteSettings) *float64 { return &s.CardOpacity })},
 		{settingKeyCardBlur, assignFloat(func(s *SiteSettings) *float64 { return &s.CardBlur })},
 		{settingKeyCardRadius, assignFloat(func(s *SiteSettings) *float64 { return &s.CardRadius })},

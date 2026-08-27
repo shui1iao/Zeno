@@ -3,7 +3,7 @@ import { AdminSettingsConflictError, type AdminSettingsUpdateInput } from '../..
 import { appearancePresetOptions, appearancePresets, appearanceValuesForSettings, shellStyleForSettings, themeOptions, type AppearanceValues } from '../../lib/appearance'
 import { validateAdminSettingsInput } from '../../lib/adminSettings'
 import { runMaybePromise, type MaybePromise } from '../../lib/maybePromise'
-import type { AdminSettings, AppearancePreset } from '../../types'
+import type { AdminSettings, AppearancePreset, ServerCardTheme } from '../../types'
 import { SlidingSelector } from '../SlidingSelector'
 import { AdminSegmentedField } from './AdminFields'
 import { AdminFormSection, AdminActionFooter, AdminWorkspaceHeading } from './AdminPrimitives'
@@ -21,8 +21,14 @@ type AdminSettingsDraft = {
   mobileBackgroundUrl: string
   customCode: string
   theme: AdminSettings['theme']
+  serverCardTheme: ServerCardTheme
   appearance: AppearanceValues
 }
+
+const serverCardThemeOptions: Array<{ value: ServerCardTheme; label: string }> = [
+  { value: 'classic', label: '经典卡片' },
+  { value: 'capsule', label: '节点舱' },
+]
 
 function adminSettingsDraft(settings: AdminSettings): AdminSettingsDraft {
   return {
@@ -33,6 +39,7 @@ function adminSettingsDraft(settings: AdminSettings): AdminSettingsDraft {
     mobileBackgroundUrl: settings.mobileBackgroundUrl,
     customCode: settings.customCode,
     theme: settings.theme,
+    serverCardTheme: settings.serverCardTheme,
     appearance: appearanceValuesForSettings(settings),
   }
 }
@@ -107,6 +114,7 @@ export default function AdminSettingsSection({ settings, onUpdate }: AdminSettin
       desktopBackgroundUrl: draft.desktopBackgroundUrl.trim(),
       mobileBackgroundUrl: draft.mobileBackgroundUrl.trim(),
       appearancePreset: appearance.appearancePreset,
+      serverCardTheme: draft.serverCardTheme,
       cardOpacity: appearance.cardOpacity,
       cardBlur: appearance.cardBlur,
       cardRadius: appearance.cardRadius,
@@ -165,6 +173,7 @@ export default function AdminSettingsSection({ settings, onUpdate }: AdminSettin
           <AdminFormSection className="admin-settings-card-section admin-settings-appearance-card" title="界面外观">
             <div className="admin-form-grid">
               <AdminSegmentedField name="theme" label="主题" value={previewTheme} options={themeOptions} onChange={(value) => updateDraft({ theme: value === 'light' || value === 'dark' ? value : 'system' })} />
+              <AdminCardThemeSelector value={draft.serverCardTheme} onChange={(serverCardTheme) => updateDraft({ serverCardTheme })} />
               <label><span>电脑端背景图 URL</span><input name="desktop-background-url" autoComplete="off" value={draft.desktopBackgroundUrl} onChange={(event) => updateDraft({ desktopBackgroundUrl: event.currentTarget.value })} placeholder="可留空" /></label>
               <label><span>手机端背景图 URL</span><input name="mobile-background-url" autoComplete="off" value={draft.mobileBackgroundUrl} onChange={(event) => updateDraft({ mobileBackgroundUrl: event.currentTarget.value })} placeholder="可留空，默认跟随电脑端" /></label>
             </div>
@@ -198,6 +207,26 @@ export default function AdminSettingsSection({ settings, onUpdate }: AdminSettin
         </div>
       </form>
     </section>
+  )
+}
+
+function AdminCardThemeSelector({ value, onChange }: { value: ServerCardTheme; onChange: (value: ServerCardTheme) => void }) {
+  return (
+    <div className="admin-appearance-preset-field admin-card-theme-field">
+      <span>服务器卡片</span>
+      <input type="hidden" name="server-card-theme" value={value} />
+      <SlidingSelector
+        ariaLabel="服务器卡片主题"
+        role="group"
+        className="admin-appearance-preset-slider sliding-selector--large"
+        options={serverCardThemeOptions.map((option) => ({
+          value: option.value,
+          content: <span className="admin-appearance-preset-option"><strong>{option.label}</strong></span>,
+        }))}
+        value={value}
+        onChange={(nextValue) => onChange(nextValue === 'capsule' ? 'capsule' : 'classic')}
+      />
+    </div>
   )
 }
 

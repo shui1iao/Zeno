@@ -1,4 +1,4 @@
-import type { AdminAlertRule, AdminNode, AdminNotificationChannel, AdminProbeTarget, AdminTheme, AppearancePreset, HomeCardNode, LatencyPoint, ProbeType, ServiceTarget, StatePoint } from '../types'
+import type { AdminAlertRule, AdminNode, AdminNotificationChannel, AdminProbeTarget, AdminTheme, AppearancePreset, HomeCardNode, LatencyPoint, ProbeType, ServerCardTheme, ServiceTarget, StatePoint } from '../types'
 import type { CurrencyRates } from '../lib/currency'
 
 export interface ApiSettings {
@@ -10,6 +10,7 @@ export interface ApiSettings {
   desktop_background_url?: string
   mobile_background_url?: string
   appearance_preset?: AppearancePreset
+  server_card_theme?: ServerCardTheme
   card_opacity?: number
   card_blur?: number
   card_radius?: number
@@ -401,6 +402,7 @@ export interface AdminSettingsUpdateInput {
   desktopBackgroundUrl?: string
   mobileBackgroundUrl?: string
   appearancePreset?: AppearancePreset
+  serverCardTheme?: ServerCardTheme
   cardOpacity?: number
   cardBlur?: number
   cardRadius?: number

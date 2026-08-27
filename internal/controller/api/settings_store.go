@@ -20,6 +20,7 @@ const (
 	settingKeyDesktopBackgroundURL = "desktop_background_url"
 	settingKeyMobileBackgroundURL  = "mobile_background_url"
 	settingKeyAppearancePreset     = "appearance_preset"
+	settingKeyServerCardTheme      = "server_card_theme"
 	settingKeyCardOpacity          = "card_opacity"
 	settingKeyCardBlur             = "card_blur"
 	settingKeyCardRadius           = "card_radius"

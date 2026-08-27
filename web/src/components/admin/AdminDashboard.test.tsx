@@ -303,6 +303,12 @@ describe('AdminDashboard', () => {
     expect(html).toContain('admin-appearance-top')
     expect(html).toContain('name="appearance-preset"')
     expect(html).toContain('高斯模糊主题')
+    expect(html).toContain('name="server-card-theme"')
+    expect(html).toContain('服务器卡片')
+    expect(html).toContain('经典卡片')
+    expect(html).toContain('节点舱')
+    expect(html.match(/class="sliding-selector admin-appearance-preset-slider sliding-selector--large"/g)).toHaveLength(2)
+    expect(html).not.toContain('admin-card-theme-slider sliding-selector--medium')
     expect(html).toContain('name="card-opacity"')
     expect(html).toContain('卡片透明度')
     expect(html).toContain('name="card-blur"')
@@ -337,6 +343,7 @@ describe('AdminDashboard', () => {
       desktopBackgroundUrl: 'https://example.com/desktop.webp',
       mobileBackgroundUrl: '',
       appearancePreset: 'default' as const,
+      serverCardTheme: 'classic' as const,
       cardOpacity: 0.7,
       cardBlur: 0,
       cardRadius: 20,
@@ -362,6 +369,7 @@ describe('AdminDashboard', () => {
     expect(validateAdminSettingsInput({ ...baseInput, agentControllerUrl: 'http://127.0.0.1:18980' })).toBeNull()
     expect(validateAdminSettingsInput({ ...baseInput, agentControllerUrl: 'https://zeno.example.com/' })).toBeNull()
     expect(validateAdminSettingsInput({ ...baseInput, appearancePreset: 'other' as never })).toContain('外观模板')
+    expect(validateAdminSettingsInput({ ...baseInput, serverCardTheme: 'rack' as never })).toContain('服务器卡片主题')
     expect(validateAdminSettingsInput({ ...baseInput, cardOpacity: 0.1 })).toContain('卡片透明度')
     expect(validateAdminSettingsInput({ ...baseInput, cardBlur: 41 })).toContain('卡片模糊度')
     expect(validateAdminSettingsInput({ ...baseInput, cardRadius: 7 })).toContain('卡片圆角')

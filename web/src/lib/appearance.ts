@@ -22,6 +22,7 @@ export const defaultSettings: AdminSettings = {
   backgroundUrl: '',
   desktopBackgroundUrl: '',
   mobileBackgroundUrl: '',
+  serverCardTheme: 'classic',
   ...defaultAppearancePreset,
   customCode: '',
   revision: 0,

@@ -146,6 +146,7 @@ export const settings: AdminSettings = {
   desktopBackgroundUrl: 'https://example.com/desktop-bg.webp',
   mobileBackgroundUrl: 'https://example.com/mobile-bg.webp',
   appearancePreset: 'gaussian_blur',
+  serverCardTheme: 'classic',
   cardOpacity: 0.58,
   cardBlur: 18,
   cardRadius: 24,

@@ -572,6 +572,7 @@ describe('normalizeSettings', () => {
       agent_controller_url: 'https://zeno.example.com',
       background_url: 'https://example.com/bg.webp',
       appearance_preset: 'gaussian_blur',
+      server_card_theme: 'capsule',
       card_opacity: 0.58,
       card_blur: 18,
       card_radius: 24,
@@ -589,6 +590,7 @@ describe('normalizeSettings', () => {
     expect(settings.agentControllerUrl).toBe('https://zeno.example.com')
     expect(settings.backgroundUrl).toBe('https://example.com/bg.webp')
     expect(settings.appearancePreset).toBe('gaussian_blur')
+    expect((settings as unknown as { serverCardTheme: string }).serverCardTheme).toBe('capsule')
     expect(settings.cardOpacity).toBe(0.58)
     expect(settings.cardBlur).toBe(18)
     expect(settings.cardRadius).toBe(24)
@@ -598,5 +600,13 @@ describe('normalizeSettings', () => {
     expect(settings.themeColor).toBe('#6366f1')
     expect(settings.customCode).toBe('<style>.home-top-card { border-color: #2563eb; }</style><script>window.ZenoCustomLoaded = true;</script>')
     expect(settings.updatedAt).toBe('2026-07-04T12:00:00Z')
+  })
+
+  it('defaults missing or invalid server card themes to classic', () => {
+    const base = {
+      site_title: 'Zeno', logo_url: '', theme: 'system' as const, background_url: '',
+    }
+    expect(normalizeSettings(base).serverCardTheme).toBe('classic')
+    expect(normalizeSettings({ ...base, server_card_theme: 'rack' as never }).serverCardTheme).toBe('classic')
   })
 })

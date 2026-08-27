@@ -41,6 +41,7 @@ type SiteSettings struct {
 	DesktopBackgroundURL string  `json:"desktop_background_url"`
 	MobileBackgroundURL  string  `json:"mobile_background_url"`
 	AppearancePreset     string  `json:"appearance_preset"`
+	ServerCardTheme      string  `json:"server_card_theme"`
 	CardOpacity          float64 `json:"card_opacity"`
 	CardBlur             float64 `json:"card_blur"`
 	CardRadius           float64 `json:"card_radius"`
@@ -63,6 +64,7 @@ type AdminSettingsUpdateRequest struct {
 	DesktopBackgroundURL *string  `json:"desktop_background_url,omitempty"`
 	MobileBackgroundURL  *string  `json:"mobile_background_url,omitempty"`
 	AppearancePreset     *string  `json:"appearance_preset,omitempty"`
+	ServerCardTheme      *string  `json:"server_card_theme,omitempty"`
 	CardOpacity          *float64 `json:"card_opacity,omitempty"`
 	CardBlur             *float64 `json:"card_blur,omitempty"`
 	CardRadius           *float64 `json:"card_radius,omitempty"`
@@ -94,6 +96,7 @@ func defaultSiteSettings() SiteSettings {
 		DesktopBackgroundURL: "",
 		MobileBackgroundURL:  "",
 		AppearancePreset:     "default",
+		ServerCardTheme:      "classic",
 		CardOpacity:          defaultCardOpacity,
 		CardBlur:             0,
 		CardRadius:           20,
@@ -123,6 +126,7 @@ func (request *AdminSettingsUpdateRequest) normalize() error {
 	normalizer.text(&request.DesktopBackgroundURL, trimOptionalValid(validSettingsAssetURL))
 	normalizer.text(&request.MobileBackgroundURL, trimOptionalValid(validSettingsAssetURL))
 	normalizer.text(&request.AppearancePreset, trimLowerValid(validAppearancePreset))
+	normalizer.text(&request.ServerCardTheme, trimLowerValid(validServerCardTheme))
 	normalizer.float(&request.CardOpacity, settingsFloatRange(0.2, 1))
 	normalizer.float(&request.CardBlur, settingsFloatRange(0, 40))
 	normalizer.float(&request.CardRadius, settingsFloatRange(8, 36))
@@ -139,6 +143,10 @@ func (request *AdminSettingsUpdateRequest) normalize() error {
 
 func validAppearancePreset(value string) bool {
 	return value == "default" || value == "gaussian_blur"
+}
+
+func validServerCardTheme(value string) bool {
+	return value == "classic" || value == "capsule"
 }
 
 func validSettingsFloat(value, min, max float64) bool {

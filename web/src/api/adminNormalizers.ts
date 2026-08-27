@@ -36,6 +36,7 @@ export function serializeAdminSettingsUpdate(input: AdminSettingsUpdateInput) {
     ...(input.desktopBackgroundUrl !== undefined ? { desktop_background_url: input.desktopBackgroundUrl } : {}),
     ...(input.mobileBackgroundUrl !== undefined ? { mobile_background_url: input.mobileBackgroundUrl } : {}),
     ...(input.appearancePreset !== undefined ? { appearance_preset: input.appearancePreset } : {}),
+    ...(input.serverCardTheme !== undefined ? { server_card_theme: input.serverCardTheme } : {}),
     ...(input.cardOpacity !== undefined ? { card_opacity: input.cardOpacity } : {}),
     ...(input.cardBlur !== undefined ? { card_blur: input.cardBlur } : {}),
     ...(input.cardRadius !== undefined ? { card_radius: input.cardRadius } : {}),

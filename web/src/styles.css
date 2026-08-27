@@ -778,6 +778,46 @@ svg { display: block; }
   transition: top 180ms cubic-bezier(.2, .8, .2, 1), outline-color 160ms ease;
   outline: 0;
 }
+.kulin-node-card.is-capsule {
+  border-left: 0;
+  padding-left: 18px;
+}
+.kulin-node-card.is-capsule .node-usage { margin-top: 16px; }
+.kulin-node-card.is-capsule .node-usage-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.kulin-node-card.is-capsule .usage-row {
+  gap: 7px;
+  padding: 10px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--resource-accent) 18%, var(--border));
+  border-radius: var(--radius-field);
+  background: transparent;
+}
+.kulin-node-card.is-capsule .usage-row:first-child,
+.kulin-node-card.is-capsule .usage-row:last-child { padding: 10px; }
+.kulin-node-card.is-capsule .usage-row__meta { font-size: 11px; }
+.kulin-node-card.is-capsule .usage-row__meta strong { color: var(--resource-accent); font-size: 13px; font-weight: 600; }
+.kulin-node-card.is-capsule .usage-track { height: 7px; }
+.kulin-node-card.is-capsule .usage-row--cpu .usage-row__detail {
+  font-size: 10px;
+  overflow: visible;
+  text-overflow: clip;
+  letter-spacing: -.02em;
+}
+.kulin-node-card.is-capsule .usage-row__detail {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 @media (hover: hover) and (pointer: fine) {
   .kulin-node-card:hover {
     top: -5px;

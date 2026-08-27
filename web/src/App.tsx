@@ -448,7 +448,7 @@ export function App() {
           <HomeRegionFilter regions={homeRegions} activeRegion={activeHomeRegion} onChange={setHomeRegion} />
 
           <section className="server-card-list" aria-label="server cards">
-            {visibleHomeNodes.map((node) => <ServerCard key={node.id} node={node} displayCurrency={activeHomeCurrency} exchangeRates={exchangeRates} onOpen={navigateNode} onIntent={preloadNodeIntent} />)}
+            {visibleHomeNodes.map((node) => <ServerCard key={node.id} node={node} serverCardTheme={effectiveSettings.serverCardTheme} displayCurrency={activeHomeCurrency} exchangeRates={exchangeRates} onOpen={navigateNode} onIntent={preloadNodeIntent} />)}
           </section>
         </div>
       )}
