@@ -85,6 +85,7 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
   const autoScrollFrameRef = useRef<number | null>(null)
   const autoScrollVelocityRef = useRef(0)
   const pointerPositionRef = useRef<{ x: number; y: number } | null>(null)
+  const dragPreviewRef = useRef<HTMLElement | null>(null)
   const orderedIdsRef = useRef(orderedIds)
   const itemByIdRef = useRef(itemById)
   const getDisplayNameRef = useRef(getDisplayName)
@@ -112,14 +113,6 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
 
   const orderedItems = orderedIds.map((itemId) => itemById.get(itemId)).filter((item): item is T => Boolean(item))
   const activeDragItem = dragState ? itemById.get(dragState.sourceId) : undefined
-
-  const setItemOrder = (updater: (currentIds: string[]) => string[]) => {
-    setOrderedIds((currentIds) => {
-      const nextIds = updater(currentIds)
-      orderedIdsRef.current = nextIds
-      return nextIds
-    })
-  }
 
   const persistOrder = (nextIds: string[], rollbackIds: string[], successAnnouncement: string) => {
     if (submitting || sameIds(nextIds, rollbackIds)) return
@@ -181,12 +174,29 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
 
   useEffect(() => {
     if (!dragStateRef.current) return undefined
+    const updateDropTarget = (clientX: number, clientY: number, currentDrag: AdminInlineSortDragState) => {
+      const targetRow = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.admin-inline-sort-row:not(.is-placeholder)')
+      const targetId = targetRow?.dataset.sortItemId
+      if (!targetId || targetId === currentDrag.sourceId) return
+      const targetBounds = targetRow.getBoundingClientRect()
+      const afterTarget = clientY >= targetBounds.top + targetBounds.height / 2
+      const nextIds = placeAdminItemBesideTarget(orderedIdsRef.current, currentDrag.sourceId, targetId, afterTarget)
+      if (nextIds === orderedIdsRef.current) return
+      orderedIdsRef.current = nextIds
+      setOrderedIds(nextIds)
+    }
+    const flushDragFrame = () => {
+      const currentDrag = dragStateRef.current
+      const pointer = pointerPositionRef.current
+      if (!currentDrag || !pointer) return
+      dragPreviewRef.current?.style.setProperty('--admin-sort-drag-y', `${currentDrag.currentY - currentDrag.startY}px`)
+      updateDropTarget(pointer.x, pointer.y, currentDrag)
+    }
     const publishDragPosition = () => {
       if (dragFrameRef.current !== null) return
       dragFrameRef.current = window.requestAnimationFrame(() => {
         dragFrameRef.current = null
-        const currentDrag = dragStateRef.current
-        if (currentDrag) setDragState({ ...currentDrag })
+        flushDragFrame()
       })
     }
     const stopAutoScroll = () => {
@@ -195,14 +205,6 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
         window.cancelAnimationFrame(autoScrollFrameRef.current)
         autoScrollFrameRef.current = null
       }
-    }
-    const updateDropTarget = (clientX: number, clientY: number, currentDrag: AdminInlineSortDragState) => {
-      const targetRow = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.admin-inline-sort-row:not(.is-placeholder)')
-      const targetId = targetRow?.dataset.sortItemId
-      if (!targetId || targetId === currentDrag.sourceId) return
-      const targetBounds = targetRow.getBoundingClientRect()
-      const afterTarget = clientY >= targetBounds.top + targetBounds.height / 2
-      setItemOrder((currentIds) => placeAdminItemBesideTarget(currentIds, currentDrag.sourceId, targetId, afterTarget))
     }
     const startAutoScroll = () => {
       if (autoScrollFrameRef.current !== null || autoScrollVelocityRef.current === 0) return
@@ -213,7 +215,6 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
         const velocity = autoScrollVelocityRef.current
         if (!currentDrag || !pointer || velocity === 0) return
         window.scrollBy(0, velocity)
-        updateDropTarget(pointer.x, pointer.y, currentDrag)
         publishDragPosition()
         autoScrollFrameRef.current = window.requestAnimationFrame(scroll)
       }
@@ -227,6 +228,7 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
         dragFrameRef.current = null
       }
       stopAutoScroll()
+      if (!cancelled) flushDragFrame()
       pointerPositionRef.current = null
       if (cancelled) {
         orderedIdsRef.current = currentDrag.originIds
@@ -249,7 +251,6 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
       dragStateRef.current = { ...currentDrag, currentY: event.clientY }
       pointerPositionRef.current = { x: event.clientX, y: event.clientY }
       publishDragPosition()
-      updateDropTarget(event.clientX, event.clientY, currentDrag)
       autoScrollVelocityRef.current = adminSortAutoScrollVelocity(event.clientY, 32, Math.max(64, window.innerHeight - 32))
       if (autoScrollVelocityRef.current === 0) stopAutoScroll()
       else startAutoScroll()
@@ -321,10 +322,11 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
       <p className="sr-only" aria-live="polite" aria-atomic="true">{sortAnnouncement}</p>
       {dragState && activeDragItem && typeof document !== 'undefined' && createPortal(
         <article
+          ref={dragPreviewRef}
           className="zeno-overlay-surface admin-list-row admin-inline-sort-row is-drag-preview"
           aria-hidden="true"
           style={{
-            '--admin-sort-drag-y': `${dragState.currentY - dragState.startY}px`,
+            '--admin-sort-drag-y': '0px',
             top: dragState.rect.top,
             left: dragState.rect.left,
             width: dragState.rect.width,
