@@ -53,7 +53,6 @@ describe('API module boundaries', () => {
   it('routes every backend save area through the shared in-flow action footer', () => {
     const expectedFooterCounts = new Map([
       ['components/admin/AdminNodeWorkspace.tsx', 2],
-      ['components/admin/AdminSortModal.tsx', 1],
       ['components/admin/AdminTargetWorkspace.tsx', 2],
       ['components/admin/AdminNotificationsWorkspace.tsx', 2],
       ['components/admin/AdminAccountSection.tsx', 1],

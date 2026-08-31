@@ -1,12 +1,11 @@
-import { type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
+import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { runMaybePromise } from '../../lib/maybePromise'
-import { AdminActionFooter, AdminModal } from './AdminPrimitives'
 import type { MaybePromise } from './adminOperationalTypes'
 
 type SortableItem = { id: string }
 
-type AdminSortDragState = {
+type AdminInlineSortDragState = {
   sourceId: string
   pointerId: number
   startY: number
@@ -46,55 +45,74 @@ export function adminSortAutoScrollVelocity(pointerY: number, top: number, botto
   return 0
 }
 
-export interface AdminSortModalProps<T extends SortableItem> {
-  items: T[]
-  title: string
-  intro: string
-  countLabel: string
-  listLabel: string
-  itemLabel: string
-  getDisplayName: (item: T) => string
-  renderItem: (item: T) => ReactNode
-  onSave: (items: T[]) => MaybePromise
-  onClose: () => void
+function sameIds(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
-export function AdminSortModal<T extends SortableItem>({ items, title, intro, countLabel, listLabel, itemLabel, getDisplayName, renderItem, onSave, onClose }: AdminSortModalProps<T>) {
-  const [orderedIds, setOrderedIds] = useState(() => items.map((item) => item.id))
-  const [dragState, setDragState] = useState<AdminSortDragState | null>(null)
+export function persistAdminItemOrder<T extends SortableItem>(itemIds: string[], itemById: Map<string, T>, onReorder: (items: T[]) => MaybePromise): Promise<void> {
+  const nextItems = itemIds.map((itemId) => itemById.get(itemId)).filter((item): item is T => Boolean(item))
+  if (nextItems.length !== itemIds.length) return Promise.reject(new Error('排序项目已发生变化，请刷新后重试'))
+  return runMaybePromise(() => onReorder(nextItems))
+}
+
+export interface AdminInlineSortRowContext {
+  dragHandle: ReactNode
+}
+
+export interface AdminInlineSortListProps<T extends SortableItem> {
+  items: T[]
+  listLabel: string
+  itemLabel: string
+  className?: string
+  getDisplayName: (item: T) => string
+  listHeader: ReactNode
+  renderRow: (item: T, context: AdminInlineSortRowContext) => ReactNode
+  onReorder: (items: T[]) => MaybePromise
+}
+
+export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, itemLabel, className = '', getDisplayName, listHeader, renderRow, onReorder }: AdminInlineSortListProps<T>) {
+  const incomingIds = items.map((item) => item.id)
+  const incomingOrderKey = incomingIds.join('\u0000')
+  const itemById = new Map(items.map((item) => [item.id, item]))
+  const [orderedIds, setOrderedIds] = useState(incomingIds)
+  const [dragState, setDragState] = useState<AdminInlineSortDragState | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [sortAnnouncement, setSortAnnouncement] = useState('')
-  const dragStateRef = useRef<AdminSortDragState | null>(null)
+  const isDragging = dragState !== null
+  const dragStateRef = useRef<AdminInlineSortDragState | null>(null)
   const dragFrameRef = useRef<number | null>(null)
   const autoScrollFrameRef = useRef<number | null>(null)
   const autoScrollVelocityRef = useRef(0)
   const pointerPositionRef = useRef<{ x: number; y: number } | null>(null)
-  const sortListRef = useRef<HTMLDivElement | null>(null)
   const orderedIdsRef = useRef(orderedIds)
-  const itemByIdRef = useRef(new Map(items.map((item) => [item.id, item])))
+  const itemByIdRef = useRef(itemById)
   const getDisplayNameRef = useRef(getDisplayName)
+
   orderedIdsRef.current = orderedIds
-  itemByIdRef.current = new Map(items.map((item) => [item.id, item]))
+  itemByIdRef.current = itemById
   getDisplayNameRef.current = getDisplayName
-  const itemById = itemByIdRef.current
 
   useEffect(() => {
     setOrderedIds((currentIds) => {
-      const availableIds = new Set(items.map((item) => item.id))
+      if (!isDragging && !submitting) {
+        if (sameIds(currentIds, incomingIds)) return currentIds
+        orderedIdsRef.current = incomingIds
+        return incomingIds
+      }
+      const availableIds = new Set(incomingIds)
       const retainedIds = currentIds.filter((itemId) => availableIds.has(itemId))
       const retainedSet = new Set(retainedIds)
-      const appendedIds = items.map((item) => item.id).filter((itemId) => !retainedSet.has(itemId))
+      const appendedIds = incomingIds.filter((itemId) => !retainedSet.has(itemId))
       const nextIds = appendedIds.length === 0 && retainedIds.length === currentIds.length ? currentIds : [...retainedIds, ...appendedIds]
       orderedIdsRef.current = nextIds
       return nextIds
     })
-  }, [items])
+  }, [incomingOrderKey, isDragging, submitting])
 
   const orderedItems = orderedIds.map((itemId) => itemById.get(itemId)).filter((item): item is T => Boolean(item))
-  const hasChanges = orderedItems.some((item, index) => item.id !== items[index]?.id)
   const activeDragItem = dragState ? itemById.get(dragState.sourceId) : undefined
-  const activeDragIndex = dragState ? orderedIds.indexOf(dragState.sourceId) : -1
+
   const setItemOrder = (updater: (currentIds: string[]) => string[]) => {
     setOrderedIds((currentIds) => {
       const nextIds = updater(currentIds)
@@ -102,24 +120,54 @@ export function AdminSortModal<T extends SortableItem>({ items, title, intro, co
       return nextIds
     })
   }
-  const moveItem = (sourceId: string, targetId: string) => setItemOrder((currentIds) => moveAdminItemInOrder(currentIds, sourceId, targetId))
+
+  const persistOrder = (nextIds: string[], rollbackIds: string[], successAnnouncement: string) => {
+    if (submitting || sameIds(nextIds, rollbackIds)) return
+    orderedIdsRef.current = nextIds
+    setOrderedIds(nextIds)
+    setSubmitting(true)
+    setFormError(null)
+    setSortAnnouncement('正在应用排序')
+    persistAdminItemOrder(nextIds, itemByIdRef.current, onReorder)
+      .then(() => setSortAnnouncement(successAnnouncement))
+      .catch((error: unknown) => {
+        orderedIdsRef.current = rollbackIds
+        setOrderedIds(rollbackIds)
+        setFormError(error instanceof Error ? error.message : '应用排序失败')
+        setSortAnnouncement('排序应用失败，已恢复原顺序')
+      })
+      .finally(() => setSubmitting(false))
+  }
+
   const moveItemByStep = (itemId: string, step: -1 | 1) => {
     if (submitting) return
-    const sourceIndex = orderedIdsRef.current.indexOf(itemId)
+    const currentIds = orderedIdsRef.current
+    const sourceIndex = currentIds.indexOf(itemId)
     const targetIndex = sourceIndex + step
-    const targetId = orderedIdsRef.current[targetIndex]
+    const targetId = currentIds[targetIndex]
     const item = itemById.get(itemId)
     if (!targetId || !item) return
-    moveItem(itemId, targetId)
-    setSortAnnouncement(`${getDisplayName(item)} 已调整为第 ${targetIndex + 1} 位`)
+    const nextIds = moveAdminItemInOrder(currentIds, itemId, targetId)
+    persistOrder(nextIds, currentIds, `${getDisplayName(item)} 已调整为第 ${targetIndex + 1} 位`)
   }
+
+  const handleSortKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, itemId: string) => {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      moveItemByStep(itemId, -1)
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      moveItemByStep(itemId, 1)
+    }
+  }
+
   const beginPointerDrag = (event: ReactPointerEvent<HTMLButtonElement>, itemId: string) => {
     if (submitting || !event.isPrimary || event.button !== 0) return
-    const row = event.currentTarget.closest<HTMLElement>('.admin-sort-row')
+    const row = event.currentTarget.closest<HTMLElement>('.admin-inline-sort-row')
     if (!row) return
     event.preventDefault()
     const bounds = row.getBoundingClientRect()
-    const nextDrag: AdminSortDragState = {
+    const nextDrag: AdminInlineSortDragState = {
       sourceId: itemId,
       pointerId: event.pointerId,
       startY: event.clientY,
@@ -148,8 +196,8 @@ export function AdminSortModal<T extends SortableItem>({ items, title, intro, co
         autoScrollFrameRef.current = null
       }
     }
-    const updateDropTarget = (clientX: number, clientY: number, currentDrag: AdminSortDragState) => {
-      const targetRow = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.admin-sort-row:not(.is-placeholder)')
+    const updateDropTarget = (clientX: number, clientY: number, currentDrag: AdminInlineSortDragState) => {
+      const targetRow = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('.admin-inline-sort-row:not(.is-placeholder)')
       const targetId = targetRow?.dataset.sortItemId
       if (!targetId || targetId === currentDrag.sourceId) return
       const targetBounds = targetRow.getBoundingClientRect()
@@ -162,15 +210,11 @@ export function AdminSortModal<T extends SortableItem>({ items, title, intro, co
         autoScrollFrameRef.current = null
         const currentDrag = dragStateRef.current
         const pointer = pointerPositionRef.current
-        const list = sortListRef.current
         const velocity = autoScrollVelocityRef.current
-        if (!currentDrag || !pointer || !list || velocity === 0) return
-        const previousScrollTop = list.scrollTop
-        list.scrollTop += velocity
-        if (list.scrollTop !== previousScrollTop) {
-          updateDropTarget(pointer.x, pointer.y, currentDrag)
-          publishDragPosition()
-        }
+        if (!currentDrag || !pointer || velocity === 0) return
+        window.scrollBy(0, velocity)
+        updateDropTarget(pointer.x, pointer.y, currentDrag)
+        publishDragPosition()
         autoScrollFrameRef.current = window.requestAnimationFrame(scroll)
       }
       autoScrollFrameRef.current = window.requestAnimationFrame(scroll)
@@ -188,9 +232,12 @@ export function AdminSortModal<T extends SortableItem>({ items, title, intro, co
         orderedIdsRef.current = currentDrag.originIds
         setOrderedIds(currentDrag.originIds)
       } else {
+        const finalIds = orderedIdsRef.current
         const item = itemByIdRef.current.get(currentDrag.sourceId)
-        const finalIndex = orderedIdsRef.current.indexOf(currentDrag.sourceId)
-        if (item && finalIndex >= 0) setSortAnnouncement(`${getDisplayNameRef.current(item)} 已调整为第 ${finalIndex + 1} 位`)
+        const finalIndex = finalIds.indexOf(currentDrag.sourceId)
+        if (item && finalIndex >= 0 && !sameIds(finalIds, currentDrag.originIds)) {
+          persistOrder(finalIds, currentDrag.originIds, `${getDisplayNameRef.current(item)} 已调整为第 ${finalIndex + 1} 位`)
+        }
       }
       dragStateRef.current = null
       setDragState(null)
@@ -203,8 +250,7 @@ export function AdminSortModal<T extends SortableItem>({ items, title, intro, co
       pointerPositionRef.current = { x: event.clientX, y: event.clientY }
       publishDragPosition()
       updateDropTarget(event.clientX, event.clientY, currentDrag)
-      const listBounds = sortListRef.current?.getBoundingClientRect()
-      autoScrollVelocityRef.current = listBounds ? adminSortAutoScrollVelocity(event.clientY, listBounds.top, listBounds.bottom) : 0
+      autoScrollVelocityRef.current = adminSortAutoScrollVelocity(event.clientY, 32, Math.max(64, window.innerHeight - 32))
       if (autoScrollVelocityRef.current === 0) stopAutoScroll()
       else startAutoScroll()
     }
@@ -239,64 +285,43 @@ export function AdminSortModal<T extends SortableItem>({ items, title, intro, co
     }
   }, [dragState !== null])
 
-  const closeModal = () => {
-    if (!submitting) onClose()
-  }
-  const saveOrder = () => {
-    if (submitting) return
-    setSubmitting(true)
-    setFormError(null)
-    runMaybePromise(() => onSave(orderedItems))
-      .catch((error: unknown) => setFormError(error instanceof Error ? error.message : '保存失败'))
-      .finally(() => setSubmitting(false))
-  }
+  const createDragHandle = (item: T, isPreview = false) => isPreview ? (
+    <span className="admin-drag-handle" aria-hidden="true"><AdminSortGrip /></span>
+  ) : (
+    <button
+      className="admin-drag-handle"
+      type="button"
+      disabled={submitting}
+      aria-label={`拖动 ${itemLabel} ${getDisplayName(item)} 调整顺序`}
+      title="拖动调整顺序"
+      onPointerDown={(event) => beginPointerDrag(event, item.id)}
+      onKeyDown={(event) => handleSortKeyDown(event, item.id)}
+    ><AdminSortGrip /></button>
+  )
 
   return (
-    <AdminModal title={title} className="admin-sort-modal" closeDisabled={submitting || dragState !== null} onClose={closeModal}>
-      <section className="admin-sort-workspace" aria-label={`调整${itemLabel}顺序`} aria-busy={submitting} inert={submitting ? true : undefined}>
-        <header className="admin-sort-intro">
-          <p>{intro}</p>
-          <span>{items.length} {countLabel}</span>
-        </header>
-        <div ref={sortListRef} className="admin-sort-list" role="list" aria-label={listLabel}>
-          {orderedItems.map((item, index) => {
-            const isFirst = index === 0
-            const isLast = index === orderedItems.length - 1
-            const isPlaceholder = dragState?.sourceId === item.id
-            return (
-              <article
-                className={`admin-sort-row${isPlaceholder ? ' is-placeholder' : ''}`}
-                role="listitem"
-                key={item.id}
-                data-sort-item-id={item.id}
-              >
-                <span className="admin-sort-index" aria-label={`第 ${index + 1} 位`}>{String(index + 1).padStart(2, '0')}</span>
-                {renderItem(item)}
-                <div className="admin-sort-controls" aria-label={`${getDisplayName(item)} 的排序操作`}>
-                  <button type="button" aria-label={`将 ${getDisplayName(item)} 上移`} title="上移" disabled={submitting || isFirst} onClick={() => moveItemByStep(item.id, -1)}><AdminSortArrow direction="up" /></button>
-                  <button type="button" aria-label={`将 ${getDisplayName(item)} 下移`} title="下移" disabled={submitting || isLast} onClick={() => moveItemByStep(item.id, 1)}><AdminSortArrow direction="down" /></button>
-                </div>
-                <button
-                  className="admin-drag-handle"
-                  type="button"
-                  disabled={submitting}
-                  aria-label={`拖动 ${getDisplayName(item)} 调整顺序`}
-                  title="拖动整行"
-                  onPointerDown={(event) => beginPointerDrag(event, item.id)}
-                ><AdminSortGrip /></button>
-              </article>
-            )
-          })}
-        </div>
-        <p className="sr-only" aria-live="polite" aria-atomic="true">{sortAnnouncement}</p>
-      </section>
-      <AdminActionFooter className="admin-sort-actions" error={formError}>
-        <button type="button" onClick={closeModal} disabled={submitting}>取消</button>
-        <button className="admin-primary-action" type="button" onClick={saveOrder} disabled={submitting || !hasChanges}>{submitting ? '保存中…' : '保存排序'}</button>
-      </AdminActionFooter>
+    <>
+      <div className={['admin-list', 'admin-inline-sort-list', className].filter(Boolean).join(' ')} role="list" aria-label={listLabel} aria-busy={submitting}>
+        {listHeader}
+        {orderedItems.map((item) => {
+          const isPlaceholder = dragState?.sourceId === item.id
+          return (
+            <article
+              className={`admin-list-row admin-inline-sort-row${isPlaceholder ? ' is-placeholder' : ''}`}
+              role="listitem"
+              key={item.id}
+              data-sort-item-id={item.id}
+            >
+              {renderRow(item, { dragHandle: createDragHandle(item) })}
+            </article>
+          )
+        })}
+      </div>
+      {formError && <p className="admin-inline-note is-error" role="alert">{formError}</p>}
+      <p className="sr-only" aria-live="polite" aria-atomic="true">{sortAnnouncement}</p>
       {dragState && activeDragItem && typeof document !== 'undefined' && createPortal(
         <article
-          className="zeno-overlay-surface admin-sort-row is-drag-preview"
+          className="zeno-overlay-surface admin-list-row admin-inline-sort-row is-drag-preview"
           aria-hidden="true"
           style={{
             '--admin-sort-drag-y': `${dragState.currentY - dragState.startY}px`,
@@ -306,19 +331,12 @@ export function AdminSortModal<T extends SortableItem>({ items, title, intro, co
             height: dragState.rect.height,
           } as CSSProperties}
         >
-          <span className="admin-sort-index">{String(activeDragIndex + 1).padStart(2, '0')}</span>
-          {renderItem(activeDragItem)}
-          <span className="admin-sort-dragging-label">移动中</span>
-          <span className="admin-drag-handle"><AdminSortGrip /></span>
+          {renderRow(activeDragItem, { dragHandle: createDragHandle(activeDragItem, true) })}
         </article>,
         document.body,
       )}
-    </AdminModal>
+    </>
   )
-}
-
-function AdminSortArrow({ direction }: { direction: 'up' | 'down' }) {
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d={direction === 'up' ? 'm5.5 12.5 4.5-5 4.5 5' : 'm5.5 7.5 4.5 5 4.5-5'} /></svg>
 }
 
 function AdminSortGrip() {
