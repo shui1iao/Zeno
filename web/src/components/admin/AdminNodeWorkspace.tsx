@@ -6,7 +6,7 @@ import type { AdminNode, AdminNodeInstallCommand, AdminProbeTarget } from '../..
 import { ServerFlag } from '../ServerFlag'
 import { AdminDateField, AdminExpandedCheckList, AdminSegmentedField } from './AdminFields'
 import { AdminInstallCommand } from './AdminInstallCommand'
-import { AdminSortModal } from './AdminSortModal'
+import { AdminInlineSortList } from './AdminInlineSortList'
 import { AdminDeleteConfirmModal, AdminFormSection, AdminModal, AdminActionFooter, AdminRowActions, AdminWorkspaceHeading } from './AdminPrimitives'
 import { billingCycleOptions, billingModeOptions, formatQuotaValue, formatRenewalAmountInput, normalizeBillingCycle, parseMonthlyResetDay, parseQuota, parseRenewalAmount, quotaUnitForBytes, quotaUnitOptions, renewalCurrencyOptions } from './adminOperationalModel'
 import type { AdminNodeWorkspaceProps, MaybePromise } from './adminOperationalTypes'
@@ -14,7 +14,6 @@ import type { AdminNodeWorkspaceProps, MaybePromise } from './adminOperationalTy
 export function AdminNodeWorkspace({ nodes, targets, onCreate, onUpdate, onReorder, onDelete, onInstallCommand }: AdminNodeWorkspaceProps) {
   const [creatingNode, setCreatingNode] = useState(false)
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
-  const [sortingNodes, setSortingNodes] = useState(false)
   const editingNode = editingNodeId ? nodes.find((node) => node.id === editingNodeId) : undefined
   const orderedNodes = sortAdminNodes(nodes)
 
@@ -23,15 +22,12 @@ export function AdminNodeWorkspace({ nodes, targets, onCreate, onUpdate, onReord
       <AdminWorkspaceHeading
         title="服务器列表"
         actions={
-          <>
-            <button className="admin-primary-action" type="button" onClick={() => setSortingNodes(true)}>服务器排序</button>
-            <button className="admin-primary-action" type="button" onClick={() => setCreatingNode(true)}>添加服务器</button>
-          </>
+          <button className="admin-primary-action" type="button" onClick={() => setCreatingNode(true)}>添加服务器</button>
         }
       />
 
       {nodes.length === 0 && <div className="admin-state-card">还没有节点。</div>}
-      {nodes.length > 0 && <AdminNodeList nodes={orderedNodes} onEdit={setEditingNodeId} onDelete={onDelete} />}
+      {nodes.length > 0 && <AdminNodeList nodes={orderedNodes} onEdit={setEditingNodeId} onDelete={onDelete} onReorder={onReorder} />}
 
       {creatingNode && (
         <AdminNodeCreateModal
@@ -51,77 +47,59 @@ export function AdminNodeWorkspace({ nodes, targets, onCreate, onUpdate, onReord
           onInstallCommand={onInstallCommand}
         />
       )}
-
-      {sortingNodes && (
-        <AdminSortModal
-          items={orderedNodes}
-          title="服务器排序"
-          intro="按住手柄拖动整行，或使用箭头微调。"
-          countLabel="台"
-          listLabel="服务器排序列表"
-          itemLabel="服务器"
-          getDisplayName={(node) => node.displayName}
-          renderItem={(node) => (
-            <span className="admin-sort-server">
-              <ServerFlag countryCode={node.countryCode} className="admin-sort-flag" />
-              <span>
-                <strong>{node.displayName}</strong>
-                <small>{node.publicIPv4 || node.publicIPv6 || '未上报公网 IP'}</small>
-              </span>
-            </span>
-          )}
-          onClose={() => setSortingNodes(false)}
-          onSave={async (nextNodes) => {
-            await onReorder(nextNodes.map((node) => node.id))
-            setSortingNodes(false)
-          }}
-        />
-      )}
     </section>
   )
 }
 
-function AdminNodeList({ nodes, onEdit, onDelete }: { nodes: AdminNode[]; onEdit: (nodeId: string) => void; onDelete: (nodeId: string) => MaybePromise }) {
+function AdminNodeList({ nodes, onEdit, onDelete, onReorder }: { nodes: AdminNode[]; onEdit: (nodeId: string) => void; onDelete: (nodeId: string) => MaybePromise; onReorder: (nodeIds: string[]) => MaybePromise }) {
   const [pendingDelete, setPendingDelete] = useState<AdminNode | null>(null)
 
   return (
     <>
-    <div className="admin-list" role="list" aria-label="服务器列表">
-      <div className="admin-list-head" aria-hidden="true">
-        <span>服务器</span>
-        <span>公网 IP</span>
-        <span>Agent 版本</span>
-        <span>操作</span>
-      </div>
-      {nodes.map((node) => (
-        <article className="admin-list-row" role="listitem" key={node.id}>
-          <div className="admin-list-main">
-            <strong className="admin-node-title"><ServerFlag countryCode={node.countryCode} className="admin-list-flag" /><span>{node.displayName}</span></strong>
+      <AdminInlineSortList
+        items={nodes}
+        listLabel="服务器列表"
+        itemLabel="服务器"
+        getDisplayName={(node) => node.displayName}
+        listHeader={(
+          <div className="admin-list-head" aria-hidden="true">
+            <span>服务器</span>
+            <span>公网 IP</span>
+            <span>Agent 版本</span>
+            <span>操作</span>
           </div>
-          <span data-label="公网 IP" className={`admin-ip-stack${node.publicIPv6 ? '' : ' is-single'}`}>
-            {node.publicIPv4 && <span>{node.publicIPv4}</span>}
-            {node.publicIPv6 && <span>{node.publicIPv6}</span>}
-            {!node.publicIPv4 && !node.publicIPv6 && <span>—</span>}
-          </span>
-          <span data-label="Agent 版本">{node.agentVersion || '—'}</span>
-          <AdminRowActions
-            entityLabel="服务器"
-            name={node.displayName}
-            onEdit={() => onEdit(node.id)}
-            onDelete={() => setPendingDelete(node)}
-          />
-        </article>
-      ))}
-    </div>
-    {pendingDelete && (
-      <AdminDeleteConfirmModal
-        title="删除服务器"
-        subjectName={pendingDelete.displayName}
-        confirmLabel="删除服务器"
-        onClose={() => setPendingDelete(null)}
-        onConfirm={() => onDelete(pendingDelete.id)}
+        )}
+        renderRow={(node, { dragHandle }) => (
+          <>
+            <div className="admin-list-main admin-inline-sort-main">
+              {dragHandle}
+              <strong className="admin-node-title"><ServerFlag countryCode={node.countryCode} className="admin-list-flag" /><span>{node.displayName}</span></strong>
+            </div>
+            <span data-label="公网 IP" className={`admin-ip-stack${node.publicIPv6 ? '' : ' is-single'}`}>
+              {node.publicIPv4 && <span>{node.publicIPv4}</span>}
+              {node.publicIPv6 && <span>{node.publicIPv6}</span>}
+              {!node.publicIPv4 && !node.publicIPv6 && <span>—</span>}
+            </span>
+            <span data-label="Agent 版本">{node.agentVersion || '—'}</span>
+            <AdminRowActions
+              entityLabel="服务器"
+              name={node.displayName}
+              onEdit={() => onEdit(node.id)}
+              onDelete={() => setPendingDelete(node)}
+            />
+          </>
+        )}
+        onReorder={(nextNodes) => onReorder(nextNodes.map((node) => node.id))}
       />
-    )}
+      {pendingDelete && (
+        <AdminDeleteConfirmModal
+          title="删除服务器"
+          subjectName={pendingDelete.displayName}
+          confirmLabel="删除服务器"
+          onClose={() => setPendingDelete(null)}
+          onConfirm={() => onDelete(pendingDelete.id)}
+        />
+      )}
     </>
   )
 }

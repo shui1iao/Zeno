@@ -49,7 +49,8 @@ describe('AdminOperationalWorkspace', () => {
     const notificationsHTML = renderToStaticMarkup(<AdminOperationalWorkspace {...commonProps} activeSection="notifications" sectionComponents={synchronousSections} />)
 
     expect(targetsHTML).toContain('aria-label="admin probe target list"')
-    expect(targetsHTML).toContain('延迟监控排序')
+    expect(targetsHTML).not.toContain('延迟监控排序')
+    expect(targetsHTML).toContain('添加目标')
     expect(targetsHTML).not.toContain('通知渠道')
     expect(notificationsHTML).toContain('通知渠道')
     expect(notificationsHTML).toContain('通知类型')

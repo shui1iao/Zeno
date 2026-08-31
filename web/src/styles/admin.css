@@ -262,6 +262,29 @@
 .admin-list-flag { flex: none; font-size: 15px; }
 .admin-list-main small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; line-height: 1.28; font-weight: 500; }
 .admin-list-row:hover { position: relative; z-index: 1; box-shadow: inset 3px 0 0 color-mix(in srgb, var(--blue) 72%, transparent); }
+.admin-inline-sort-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.admin-inline-sort-main > .admin-drag-handle { flex: none; width: 30px; height: 30px; }
+.admin-inline-sort-row.is-placeholder {
+  background: color-mix(in srgb, var(--blue) 7%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--blue) 72%, transparent);
+}
+.admin-inline-sort-row.is-placeholder > * { opacity: 0; }
+.admin-inline-sort-row.is-drag-preview {
+  position: fixed;
+  z-index: 3000;
+  overflow: hidden;
+  pointer-events: none;
+  box-shadow: 0 16px 34px -20px rgb(0 0 0 / 55%), inset 3px 0 0 var(--blue);
+  transform: translate3d(0, var(--admin-sort-drag-y), 0);
+  will-change: transform;
+}
+.admin-inline-sort-row.is-drag-preview .admin-row-actions { visibility: hidden; }
 .admin-node-section .admin-list-main strong,
 .admin-target-section .admin-list-main strong,
 .admin-notification-section .admin-list-main strong,
@@ -1313,125 +1336,6 @@
   border-color: color-mix(in srgb, var(--red) 60%, var(--border));
   background: color-mix(in srgb, var(--red) 88%, #000);
 }
-.admin-modal.admin-sort-modal {
-  width: min(640px, 100%);
-}
-.admin-sort-modal .admin-modal-header { padding-bottom: 12px; }
-.admin-sort-modal .admin-modal-header h3 { font-size: 21px; }
-.admin-sort-workspace { min-width: 0; margin-top: 12px; }
-.admin-sort-intro {
-  min-height: 26px;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.admin-sort-intro p { margin: 0; color: var(--muted); font-size: 12px; font-weight: 500; line-height: 1.45; }
-.admin-sort-intro > span {
-  flex: none;
-  padding: 4px 8px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--blue) 9%, transparent);
-  color: var(--blue);
-  font-size: 11px;
-  font-weight: 500;
-}
-.admin-sort-list {
-  display: grid;
-  gap: 0;
-  margin: 0;
-  padding: 0;
-  max-height: min(55dvh, 560px);
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  border: 1px solid var(--divider);
-  border-radius: var(--radius-card);
-  background: transparent;
-}
-.admin-sort-row {
-  position: relative;
-  min-width: 0;
-  min-height: 54px;
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto 36px;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  cursor: default;
-  user-select: none;
-  transition: background-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
-}
-.admin-sort-row + .admin-sort-row { border-top: 1px solid var(--divider); }
-.admin-sort-row:hover { background: color-mix(in srgb, var(--blue) 4%, transparent); }
-.admin-sort-row.is-placeholder {
-  background: color-mix(in srgb, var(--blue) 7%, transparent);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--blue) 72%, transparent);
-}
-.admin-sort-row.is-placeholder > * { opacity: 0; }
-.admin-sort-row.is-drag-preview {
-  position: fixed;
-  z-index: 3000;
-  overflow: hidden;
-  pointer-events: none;
-  border-radius: 0;
-  transform: translate3d(0, var(--admin-sort-drag-y), 0);
-  will-change: transform;
-}
-.admin-sort-server { min-width: 0; display: flex; align-items: center; gap: 6px; }
-.admin-sort-flag { flex: none; font-size: 14px; }
-.admin-sort-server > span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.admin-sort-server strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--foreground);
-  font-size: 13px;
-  font-weight: 500;
-}
-.admin-sort-server small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
-  font-size: 10.5px;
-  font-weight: 500;
-}
-.admin-sort-controls { display: inline-flex; align-items: center; gap: 2px; }
-.admin-sort-controls button {
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--blue) 8%, transparent);
-  color: var(--blue);
-  cursor: pointer;
-  transition: background-color 140ms ease, color 140ms ease;
-}
-.admin-sort-controls button:hover:not(:disabled),
-.admin-sort-controls button:focus-visible { background: color-mix(in srgb, var(--blue) 16%, transparent); color: var(--blue); }
-.admin-sort-controls button:focus-visible { outline: 2px solid color-mix(in srgb, var(--blue) 36%, transparent); outline-offset: 1px; }
-.admin-sort-controls button:disabled { background: transparent; color: var(--muted); opacity: .32; cursor: not-allowed; }
-.admin-sort-controls svg {
-  width: 17px;
-  height: 17px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
 .admin-drag-handle {
   width: 34px;
   height: 34px;
@@ -1453,50 +1357,6 @@
 .admin-drag-handle:active { cursor: grabbing; }
 .admin-drag-handle:focus-visible { outline: 2px solid color-mix(in srgb, var(--blue) 36%, transparent); outline-offset: 1px; }
 .admin-drag-handle svg { width: 20px; height: 20px; fill: currentColor; }
-.admin-sort-index {
-  width: 30px;
-  height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--blue) 9%, transparent);
-  color: var(--blue);
-  font-size: 10px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-.admin-sort-dragging-label {
-  justify-self: end;
-  padding: 4px 8px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--blue) 11%, transparent);
-  color: var(--blue);
-  font-size: 10px;
-  font-weight: 500;
-}
-.admin-sort-actions { gap: 8px; margin-top: 12px; padding-top: 10px; }
-.admin-sort-actions button { min-height: 38px; padding: 0 14px; border-radius: var(--radius-field); font-size: 13px; }
-.admin-sort-actions button:not(.admin-primary-action) {
-  border-color: color-mix(in srgb, var(--blue) 42%, var(--border));
-  background: color-mix(in srgb, var(--blue) 7%, transparent);
-  color: var(--blue);
-}
-.admin-sort-actions button:not(.admin-primary-action):hover {
-  border-color: var(--blue);
-  background: color-mix(in srgb, var(--blue) 13%, transparent);
-}
-.admin-sort-actions button.admin-primary-action {
-  border-color: var(--blue);
-  background: var(--blue);
-  color: #fff;
-  box-shadow: 0 8px 20px -16px var(--blue);
-}
-.admin-sort-actions button.admin-primary-action:hover {
-  border-color: var(--blue);
-  background: color-mix(in srgb, var(--blue) 88%, #ffffff 12%);
-  color: #fff;
-}
 @media (max-width: 767px) {
   .kulin-shell[data-appearance='gaussian_blur'] .admin-content-card.admin-content-card--grouped {
     background: transparent;
@@ -1546,6 +1406,11 @@
   .admin-notification-list .admin-list-row,
   .admin-alert-rule-list .admin-list-row { grid-template-columns: minmax(0, 1fr) auto; }
   .admin-list-main { grid-column: 1 / 2; padding-right: 4px; gap: 2px; }
+  .admin-inline-sort-main { gap: 6px; }
+  .admin-inline-sort-main > strong {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
   .admin-list-main strong { font-size: 15px; }
   .admin-row-actions.admin-icon-actions { grid-column: 2 / 3; grid-row: 1; width: auto; align-self: start; justify-self: end; display: flex; justify-content: flex-end; gap: 6px; }
   .admin-list-row > span {
@@ -1583,29 +1448,10 @@
   .admin-alert-rule-list .admin-row-actions.admin-icon-actions { grid-column: 2 / 3; grid-row: 1; width: auto; display: flex; justify-content: flex-end; }
   .admin-notification-list .admin-row-action.is-icon,
   .admin-alert-rule-list .admin-row-action.is-icon { width: 36px; height: 36px; flex: 0 0 36px; border-radius: var(--radius-pill); }
-  .admin-sort-workspace { margin-top: 10px; }
-  .admin-sort-intro { margin-bottom: 7px; }
-  .admin-sort-intro p { font-size: 11px; }
-  .admin-sort-list { gap: 0; margin: 0; padding: 0; }
-  .admin-sort-row {
-    grid-template-columns: 30px minmax(0, 1fr) auto 34px;
-    gap: 6px;
-    min-height: 50px;
-    padding: 5px 6px;
-  }
-  .admin-sort-row:hover { background: transparent; }
-  .admin-sort-row.is-placeholder { background: color-mix(in srgb, var(--blue) 7%, transparent); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--blue) 72%, transparent); }
-  .admin-sort-index { width: 28px; height: 28px; font-size: 9.5px; }
-  .admin-sort-server strong { font-size: 12.5px; }
-  .admin-sort-server small { font-size: 10px; }
-  .admin-sort-controls { gap: 1px; }
-  .admin-sort-controls button { width: 28px; height: 28px; }
   .admin-drag-handle { width: 32px; height: 32px; }
-  .admin-sort-dragging-label { display: none; }
   .admin-modal-backdrop { align-items: center; padding: 8px; }
   .admin-notification-group + .admin-notification-group { margin-top: 14px; padding-top: 14px; }
   .admin-modal { width: 100%; height: min(92dvh, 760px); max-height: calc(100dvh - 16px); border-radius: var(--radius-panel); padding: 0; }
-  .admin-modal.admin-sort-modal { height: auto; }
   .admin-modal-header { padding: 14px; }
   .admin-modal-header h3 { font-size: 20px; }
   .admin-modal-body { padding: 0 12px; overflow: auto; }

@@ -4,7 +4,7 @@ import { sortAdminProbeTargets } from '../../lib/adminCollections'
 import { runMaybePromise } from '../../lib/maybePromise'
 import type { AdminNode, AdminProbeTarget, ProbeType } from '../../types'
 import { AdminExpandedCheckList, AdminSegmentedField } from './AdminFields'
-import { AdminSortModal } from './AdminSortModal'
+import { AdminInlineSortList } from './AdminInlineSortList'
 import { AdminDeleteConfirmModal, AdminFormSection, AdminModal, AdminActionFooter, AdminRowActions, AdminWorkspaceHeading } from './AdminPrimitives'
 import { formatTargetAssignmentSummary, formatTargetEndpoint, normalizeTargetFormType, parsePositiveInt, targetAssignmentRows, targetTypeOptions } from './adminOperationalModel'
 import type { AdminTargetWorkspaceProps, MaybePromise } from './adminOperationalTypes'
@@ -12,7 +12,6 @@ import type { AdminTargetWorkspaceProps, MaybePromise } from './adminOperational
 export function AdminTargetWorkspace({ targets, nodes, onCreate, onUpdate, onReorder, onDelete }: AdminTargetWorkspaceProps) {
   const [creatingTarget, setCreatingTarget] = useState(false)
   const [editingTargetId, setEditingTargetId] = useState<string | null>(null)
-  const [sortingTargets, setSortingTargets] = useState(false)
   const editingTarget = editingTargetId ? targets.find((target) => target.id === editingTargetId) : undefined
   const sortedTargets = sortAdminProbeTargets(targets)
 
@@ -21,46 +20,18 @@ export function AdminTargetWorkspace({ targets, nodes, onCreate, onUpdate, onReo
       <AdminWorkspaceHeading
         title="延迟监控"
         actions={
-          <>
-            <button className="admin-primary-action" type="button" onClick={() => setSortingTargets(true)}>延迟监控排序</button>
-            <button className="admin-primary-action" type="button" onClick={() => setCreatingTarget(true)}>添加目标</button>
-          </>
+          <button className="admin-primary-action" type="button" onClick={() => setCreatingTarget(true)}>添加目标</button>
         }
       />
 
       {targets.length === 0 && <div className="admin-state-card">还没有探针目标。</div>}
-      {targets.length > 0 && <AdminTargetList targets={sortedTargets} onEdit={setEditingTargetId} onDelete={onDelete} />}
+      {targets.length > 0 && <AdminTargetList targets={sortedTargets} onEdit={setEditingTargetId} onDelete={onDelete} onReorder={onReorder} />}
 
       {creatingTarget && (
         <AdminTargetCreateModal
           nodes={nodes}
           onClose={() => setCreatingTarget(false)}
           onCreate={onCreate}
-        />
-      )}
-
-      {sortingTargets && (
-        <AdminSortModal
-          items={sortedTargets}
-          title="延迟监控排序"
-          intro="按住手柄拖动整行，或使用箭头微调。"
-          countLabel="个目标"
-          listLabel="延迟监控排序列表"
-          itemLabel="延迟监控"
-          getDisplayName={(target) => target.name}
-          renderItem={(target) => (
-            <span className="admin-sort-server">
-              <span>
-                <strong>{target.name}</strong>
-                <small>{formatTargetEndpoint(target)}</small>
-              </span>
-            </span>
-          )}
-          onClose={() => setSortingTargets(false)}
-          onSave={async (nextTargets) => {
-            await onReorder(nextTargets.map((target) => target.id))
-            setSortingTargets(false)
-          }}
         />
       )}
 
@@ -77,43 +48,52 @@ export function AdminTargetWorkspace({ targets, nodes, onCreate, onUpdate, onReo
   )
 }
 
-function AdminTargetList({ targets, onEdit, onDelete }: { targets: AdminProbeTarget[]; onEdit: (targetId: string) => void; onDelete: (targetId: string) => MaybePromise }) {
+function AdminTargetList({ targets, onEdit, onDelete, onReorder }: { targets: AdminProbeTarget[]; onEdit: (targetId: string) => void; onDelete: (targetId: string) => MaybePromise; onReorder: (targetIds: string[]) => MaybePromise }) {
   const [pendingDelete, setPendingDelete] = useState<AdminProbeTarget | null>(null)
 
   return (
     <>
-    <div className="admin-list admin-target-list" role="list" aria-label="延迟监控目标列表">
-      <div className="admin-list-head" aria-hidden="true">
-        <span>目标</span>
-        <span>地址</span>
-        <span>节点</span>
-        <span>操作</span>
-      </div>
-      {targets.map((target) => (
-        <article className="admin-list-row" role="listitem" key={target.id}>
-          <div className="admin-list-main">
-            <strong>{target.name}</strong>
+      <AdminInlineSortList
+        items={targets}
+        className="admin-target-list"
+        listLabel="延迟监控目标列表"
+        itemLabel="延迟监控"
+        getDisplayName={(target) => target.name}
+        listHeader={(
+          <div className="admin-list-head" aria-hidden="true">
+            <span>目标</span>
+            <span>地址</span>
+            <span>节点</span>
+            <span>操作</span>
           </div>
-          <span data-label="地址">{formatTargetEndpoint(target)}</span>
-          <span data-label="节点">{formatTargetAssignmentSummary(target)}</span>
-          <AdminRowActions
-            entityLabel="目标"
-            name={target.name}
-            onEdit={() => onEdit(target.id)}
-            onDelete={() => setPendingDelete(target)}
-          />
-        </article>
-      ))}
-    </div>
-    {pendingDelete && (
-      <AdminDeleteConfirmModal
-        title="删除延迟监控"
-        subjectName={pendingDelete.name}
-        confirmLabel="删除延迟监控"
-        onClose={() => setPendingDelete(null)}
-        onConfirm={() => onDelete(pendingDelete.id)}
+        )}
+        renderRow={(target, { dragHandle }) => (
+          <>
+            <div className="admin-list-main admin-inline-sort-main">
+              {dragHandle}
+              <strong>{target.name}</strong>
+            </div>
+            <span data-label="地址">{formatTargetEndpoint(target)}</span>
+            <span data-label="节点">{formatTargetAssignmentSummary(target)}</span>
+            <AdminRowActions
+              entityLabel="目标"
+              name={target.name}
+              onEdit={() => onEdit(target.id)}
+              onDelete={() => setPendingDelete(target)}
+            />
+          </>
+        )}
+        onReorder={(nextTargets) => onReorder(nextTargets.map((target) => target.id))}
       />
-    )}
+      {pendingDelete && (
+        <AdminDeleteConfirmModal
+          title="删除延迟监控"
+          subjectName={pendingDelete.name}
+          confirmLabel="删除延迟监控"
+          onClose={() => setPendingDelete(null)}
+          onConfirm={() => onDelete(pendingDelete.id)}
+        />
+      )}
     </>
   )
 }

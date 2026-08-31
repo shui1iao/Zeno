@@ -643,7 +643,7 @@ X-Admin-Token: <admin-token>
 
 ### PATCH /api/admin/v1/nodes/reorder
 
-一次提交完整服务器顺序。`node_ids` 必须无重复地覆盖当前全部可见服务器；后端先校验整组 ID，再在单个 SQLite 事务中按 10、20、30… 写入 `display_order`。任一校验或写入失败都会整体回滚，不会留下部分排序；成功返回 `204 No Content`。
+一次提交完整服务器顺序。后台直接在服务器列表内拖动，或聚焦拖动手柄后使用上下方向键调整；操作完成即调用本接口，不再经过额外的保存/取消步骤。`node_ids` 必须无重复地覆盖当前全部可见服务器；后端先校验整组 ID，再在单个 SQLite 事务中按 10、20、30… 写入 `display_order`。任一校验或写入失败都会整体回滚，不会留下部分排序；成功返回 `204 No Content`。
 
 ```json
 {
@@ -709,7 +709,7 @@ X-Admin-Token: <admin-token>
 
 ### GET /api/admin/v1/probe-targets
 
-探针目标管理列表，返回所有有效目标、显示顺序及分配到哪些节点。目标创建后默认有效，不提供全局启用/停用开关；是否由某台服务器执行探测，只由 `assignments[].enabled` 控制。列表按 `display_order ASC, id ASC` 排序；后台“延迟监控排序”与服务器排序使用相同的拖拽/箭头交互，完整顺序通过批量接口一次性写入。不会返回 Agent token、token hash 或 secret 字段。
+探针目标管理列表，返回所有有效目标、显示顺序及分配到哪些节点。目标创建后默认有效，不提供全局启用/停用开关；是否由某台服务器执行探测，只由 `assignments[].enabled` 控制。列表按 `display_order ASC, id ASC` 排序；后台直接在延迟监控列表内拖动，或聚焦拖动手柄后使用上下方向键调整，操作完成即通过批量接口写入完整顺序。不会返回 Agent token、token hash 或 secret 字段。
 
 响应：
 
