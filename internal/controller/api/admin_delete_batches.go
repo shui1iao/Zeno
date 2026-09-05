@@ -10,7 +10,7 @@ import (
 )
 
 // Admin deletion only tombstones the entity in the request transaction. Raw
-// history is then removed in bounded transactions by this durable
+// history and rollups are then removed in bounded transactions by this durable
 // worker. Each write takes its own turn in the shared fair writer scheduler;
 // orchestration methods must not acquire a second, enclosing permit.
 // The job row is the durable queue: pending and interrupted running
@@ -57,6 +57,26 @@ const (
 		DELETE FROM state_samples
 		WHERE id IN (
 			SELECT id FROM state_samples WHERE node_id = ? LIMIT ?
+		)`
+	// Match the existing node-prefix and target/bucket covering indexes so
+	// selection and deletion are bounded; do not leave rollups to FK cascades.
+	deleteNodeStateRollupsBatchSQL = `
+		DELETE FROM state_history_rollups
+		WHERE rowid IN (
+			SELECT rowid FROM state_history_rollups
+			WHERE node_id = ? ORDER BY bucket_start LIMIT ?
+		)`
+	deleteNodeLatencyRollupsBatchSQL = `
+		DELETE FROM latency_history_rollups
+		WHERE rowid IN (
+			SELECT rowid FROM latency_history_rollups
+			WHERE node_id = ? ORDER BY target_id, bucket_start LIMIT ?
+		)`
+	deleteTargetLatencyRollupsBatchSQL = `
+		DELETE FROM latency_history_rollups
+		WHERE rowid IN (
+			SELECT rowid FROM latency_history_rollups
+			WHERE target_id = ? ORDER BY bucket_start, node_id LIMIT ?
 		)`
 )
 
@@ -356,15 +376,25 @@ func (s *sqliteAdminDeletion) processAdminNodeDeletionBatch(ctx context.Context,
 	if err != nil || removed > 0 {
 		return removed > 0, err
 	}
-	removed, err = s.deleteAdminRowsBatch(ctx, deleteNodeStateSamplesBatchSQL, nodeID)
-	if err != nil || removed > 0 {
-		return removed > 0, err
+	for _, query := range []string{
+		deleteNodeStateSamplesBatchSQL,
+		deleteNodeStateRollupsBatchSQL,
+		deleteNodeLatencyRollupsBatchSQL,
+	} {
+		removed, err = s.deleteAdminRowsBatch(ctx, query, nodeID)
+		if err != nil || removed > 0 {
+			return removed > 0, err
+		}
 	}
 	return true, s.finalizeAdminNodeDeletion(ctx, nodeID)
 }
 
 func (s *sqliteAdminDeletion) processAdminProbeTargetDeletionBatch(ctx context.Context, targetID string) (bool, error) {
 	removed, err := s.deleteAdminProbeHistoryBatch(ctx, deleteTargetProbeSamplesBatchSQL, deleteTargetProbeRoundsBatchSQL, targetID)
+	if err != nil || removed > 0 {
+		return removed > 0, err
+	}
+	removed, err = s.deleteAdminRowsBatch(ctx, deleteTargetLatencyRollupsBatchSQL, targetID)
 	if err != nil || removed > 0 {
 		return removed > 0, err
 	}
@@ -420,8 +450,10 @@ func (s *sqliteAdminDeletion) finalizeAdminNodeDeletion(ctx context.Context, nod
 		if err := tx.QueryRowContext(ctx, `
 			SELECT
 				EXISTS (SELECT 1 FROM state_samples WHERE node_id = ?) +
-				EXISTS (SELECT 1 FROM probe_rounds WHERE node_id = ?)
-		`, nodeID, nodeID).Scan(&historyRows); err != nil {
+				EXISTS (SELECT 1 FROM probe_rounds WHERE node_id = ?) +
+				EXISTS (SELECT 1 FROM state_history_rollups WHERE node_id = ?) +
+				EXISTS (SELECT 1 FROM latency_history_rollups WHERE node_id = ?)
+		`, nodeID, nodeID, nodeID, nodeID).Scan(&historyRows); err != nil {
 			return err
 		}
 		if historyRows != 0 {
@@ -480,7 +512,11 @@ func (s *sqliteAdminDeletion) finalizeAdminProbeTargetDeletion(ctx context.Conte
 			return err
 		}
 		var historyRows int
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM probe_rounds WHERE target_id = ?)`, targetID).Scan(&historyRows); err != nil {
+		if err := tx.QueryRowContext(ctx, `
+			SELECT
+				EXISTS (SELECT 1 FROM probe_rounds WHERE target_id = ?) +
+				EXISTS (SELECT 1 FROM latency_history_rollups WHERE target_id = ?)
+		`, targetID, targetID).Scan(&historyRows); err != nil {
 			return err
 		}
 		if historyRows != 0 {

@@ -49,6 +49,18 @@ func TestAdminDeletionWritesUseSharedScheduler(t *testing.T) {
 			_, err := s.deleteAdminRowsBatch(ctx, deleteNodeStateSamplesBatchSQL, job.id)
 			return err
 		}},
+		{"node_state_rollup_batch", func(ctx context.Context, s *SQLiteStore) error {
+			_, err := s.deleteAdminRowsBatch(ctx, deleteNodeStateRollupsBatchSQL, job.id)
+			return err
+		}},
+		{"node_latency_rollup_batch", func(ctx context.Context, s *SQLiteStore) error {
+			_, err := s.deleteAdminRowsBatch(ctx, deleteNodeLatencyRollupsBatchSQL, job.id)
+			return err
+		}},
+		{"target_latency_rollup_batch", func(ctx context.Context, s *SQLiteStore) error {
+			_, err := s.deleteAdminRowsBatch(ctx, deleteTargetLatencyRollupsBatchSQL, "example-node-a-local")
+			return err
+		}},
 		{"finalize_node", func(ctx context.Context, s *SQLiteStore) error { return s.finalizeAdminNodeDeletion(ctx, job.id) }},
 		{"finalize_target", func(ctx context.Context, s *SQLiteStore) error {
 			return s.finalizeAdminProbeTargetDeletion(ctx, "example-node-a-local")
