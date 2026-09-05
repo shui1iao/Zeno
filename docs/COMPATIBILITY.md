@@ -8,8 +8,9 @@
 
 | Controller | Agent | 状态 | 说明 |
 | --- | --- | --- | --- |
-| v1.0.15 | v0.6.6 | 支持 | 当前稳定组合 |
-| v1.0.14 | v0.6.6 | 支持 | 上一稳定组合 |
+| v1.0.16 | v0.6.6 | 支持 | 当前稳定组合 |
+| v1.0.15 | v0.6.6 | 支持 | 上一稳定组合 |
+| v1.0.14 | v0.6.6 | 支持 | 更早稳定组合 |
 | v1.0.12 | v0.6.6 | 支持 | 更早稳定组合 |
 | v1.0.10 | v0.6.6 | 支持 | 更早稳定组合 |
 | v1.0.9 | v0.6.6 | 支持 | 更早稳定组合 |
@@ -41,8 +42,9 @@
 
 | Controller | Agent | Status | Notes |
 | --- | --- | --- | --- |
-| v1.0.15 | v0.6.6 | Supported | Current stable combination |
-| v1.0.14 | v0.6.6 | Supported | Previous stable combination |
+| v1.0.16 | v0.6.6 | Supported | Current stable combination |
+| v1.0.15 | v0.6.6 | Supported | Previous stable combination |
+| v1.0.14 | v0.6.6 | Supported | Earlier stable combination |
 | v1.0.12 | v0.6.6 | Supported | Earlier stable combination |
 | v1.0.10 | v0.6.6 | Supported | Earlier stable combination |
 | v1.0.9 | v0.6.6 | Supported | Earlier stable combination |
