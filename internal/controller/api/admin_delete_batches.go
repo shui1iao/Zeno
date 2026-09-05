@@ -10,8 +10,10 @@ import (
 )
 
 // Admin deletion only tombstones the entity in the request transaction. Raw
-// history is then removed in bounded autocommit transactions by this durable
-// worker. The job row is the durable queue: pending and interrupted running
+// history is then removed in bounded transactions by this durable
+// worker. Each write takes its own turn in the shared fair writer scheduler;
+// orchestration methods must not acquire a second, enclosing permit.
+// The job row is the durable queue: pending and interrupted running
 // jobs are both resumed after a Controller restart.
 var errAdminDeletionHistoryRemaining = errors.New("admin deletion history remains")
 
@@ -23,34 +25,34 @@ const (
 )
 
 const (
+	// Limit candidate rounds before looking for samples. LIMIT on joined
+	// samples alone revisits every previously emptied round on every batch.
+	selectNodeAdminProbeRoundsBatchSQL = `
+		SELECT id FROM probe_rounds WHERE node_id = ? ORDER BY ts, id LIMIT ?`
+	selectTargetAdminProbeRoundsBatchSQL = `
+		SELECT id FROM probe_rounds WHERE target_id = ? ORDER BY ts, id LIMIT ?`
 	deleteNodeProbeSamplesBatchSQL = `
 		DELETE FROM probe_samples
 		WHERE (round_id, seq) IN (
-			SELECT ps.round_id, ps.seq
-			FROM probe_samples ps
-			JOIN probe_rounds pr ON pr.id = ps.round_id
-			WHERE pr.node_id = ?
+			SELECT round_id, seq FROM probe_samples
+			WHERE round_id IN (` + selectNodeAdminProbeRoundsBatchSQL + `)
 			LIMIT ?
 		)`
 	deleteTargetProbeSamplesBatchSQL = `
 		DELETE FROM probe_samples
 		WHERE (round_id, seq) IN (
-			SELECT ps.round_id, ps.seq
-			FROM probe_samples ps
-			JOIN probe_rounds pr ON pr.id = ps.round_id
-			WHERE pr.target_id = ?
+			SELECT round_id, seq FROM probe_samples
+			WHERE round_id IN (` + selectTargetAdminProbeRoundsBatchSQL + `)
 			LIMIT ?
 		)`
 	deleteNodeProbeRoundsBatchSQL = `
 		DELETE FROM probe_rounds
-		WHERE id IN (
-			SELECT id FROM probe_rounds WHERE node_id = ? LIMIT ?
-		)`
+		WHERE id IN (` + selectNodeAdminProbeRoundsBatchSQL + `)
+		AND NOT EXISTS (SELECT 1 FROM probe_samples WHERE round_id = probe_rounds.id)`
 	deleteTargetProbeRoundsBatchSQL = `
 		DELETE FROM probe_rounds
-		WHERE id IN (
-			SELECT id FROM probe_rounds WHERE target_id = ? LIMIT ?
-		)`
+		WHERE id IN (` + selectTargetAdminProbeRoundsBatchSQL + `)
+		AND NOT EXISTS (SELECT 1 FROM probe_samples WHERE round_id = probe_rounds.id)`
 	deleteNodeStateSamplesBatchSQL = `
 		DELETE FROM state_samples
 		WHERE id IN (
@@ -65,12 +67,13 @@ type adminDeletionJob struct {
 
 type sqliteAdminDeletion struct {
 	db     *sql.DB
+	writes *sqliteWriteState
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
 
 func (s *sqliteAdminDeletion) enqueueAdminNodeDeletion(ctx context.Context, nodeID string) error {
-	return retrySQLiteBusy(ctx, func() error {
+	return s.writes.withAgentWrite(ctx, adminDeletionWriteKey, func(ctx context.Context) error {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -153,7 +156,7 @@ func (s *sqliteAdminDeletion) enqueueAdminNodeDeletion(ctx context.Context, node
 }
 
 func (s *sqliteAdminDeletion) enqueueAdminProbeTargetDeletion(ctx context.Context, targetID string) error {
-	return retrySQLiteBusy(ctx, func() error {
+	return s.writes.withAgentWrite(ctx, adminDeletionWriteKey, func(ctx context.Context) error {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -311,7 +314,7 @@ func (s *sqliteAdminDeletion) nextAdminDeletionJob(ctx context.Context) (adminDe
 }
 
 func (s *sqliteAdminDeletion) markAdminDeletionJobRunning(ctx context.Context, job adminDeletionJob) error {
-	return retrySQLiteBusy(ctx, func() error {
+	return s.writes.withAgentWrite(ctx, adminDeletionWriteKey, func(ctx context.Context) error {
 		_, err := s.db.ExecContext(ctx, `
 			UPDATE admin_deletion_jobs
 			SET state = 'running',
@@ -327,7 +330,7 @@ func (s *sqliteAdminDeletion) markAdminDeletionJobRunning(ctx context.Context, j
 func (s *sqliteAdminDeletion) recordAdminDeletionError(job adminDeletionJob, processErr error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = retrySQLiteBusy(ctx, func() error {
+	_ = s.writes.withAgentWrite(ctx, adminDeletionWriteKey, func(ctx context.Context) error {
 		_, err := s.db.ExecContext(ctx, `
 			UPDATE admin_deletion_jobs
 			SET state = 'pending', last_error = ?, updated_at = ?
@@ -349,33 +352,62 @@ func boundedAdminDeletionError(err error) string {
 }
 
 func (s *sqliteAdminDeletion) processAdminNodeDeletionBatch(ctx context.Context, nodeID string) (bool, error) {
-	for _, query := range []string{deleteNodeProbeSamplesBatchSQL, deleteNodeProbeRoundsBatchSQL, deleteNodeStateSamplesBatchSQL} {
-		removed, err := s.deleteAdminRowsBatch(ctx, query, nodeID)
-		if err != nil {
-			return false, err
-		}
-		if removed > 0 {
-			return true, nil
-		}
+	removed, err := s.deleteAdminProbeHistoryBatch(ctx, deleteNodeProbeSamplesBatchSQL, deleteNodeProbeRoundsBatchSQL, nodeID)
+	if err != nil || removed > 0 {
+		return removed > 0, err
+	}
+	removed, err = s.deleteAdminRowsBatch(ctx, deleteNodeStateSamplesBatchSQL, nodeID)
+	if err != nil || removed > 0 {
+		return removed > 0, err
 	}
 	return true, s.finalizeAdminNodeDeletion(ctx, nodeID)
 }
 
 func (s *sqliteAdminDeletion) processAdminProbeTargetDeletionBatch(ctx context.Context, targetID string) (bool, error) {
-	for _, query := range []string{deleteTargetProbeSamplesBatchSQL, deleteTargetProbeRoundsBatchSQL} {
-		removed, err := s.deleteAdminRowsBatch(ctx, query, targetID)
-		if err != nil {
-			return false, err
-		}
-		if removed > 0 {
-			return true, nil
-		}
+	removed, err := s.deleteAdminProbeHistoryBatch(ctx, deleteTargetProbeSamplesBatchSQL, deleteTargetProbeRoundsBatchSQL, targetID)
+	if err != nil || removed > 0 {
+		return removed > 0, err
 	}
 	return true, s.finalizeAdminProbeTargetDeletion(ctx, targetID)
 }
 
+// Bound both examined rounds and deleted samples, including jobs resumed after
+// the old worker left an arbitrarily large prefix of empty rounds. Removing the
+// newly empty rounds in the same transaction advances the next batch's window
+// without a durable cursor or an unbounded ON DELETE CASCADE for dense rounds.
+func (s *sqliteAdminDeletion) deleteAdminProbeHistoryBatch(ctx context.Context, samplesSQL, roundsSQL, id string) (int64, error) {
+	return withAgentWriteResult(s.writes, ctx, adminDeletionWriteKey, func(ctx context.Context) (int64, error) {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return 0, err
+		}
+		defer func() { rollbackUnlessCommitted(tx) }()
+		result, err := tx.ExecContext(ctx, samplesSQL, id, adminDeleteBatchSize, adminDeleteBatchSize)
+		if err != nil {
+			return 0, err
+		}
+		samples, err := result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		result, err = tx.ExecContext(ctx, roundsSQL, id, adminDeleteBatchSize)
+		if err != nil {
+			return 0, err
+		}
+		rounds, err := result.RowsAffected()
+		if err != nil {
+			return 0, err
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, err
+		}
+		tx = nil
+		return samples + rounds, nil
+	})
+}
+
 func (s *sqliteAdminDeletion) finalizeAdminNodeDeletion(ctx context.Context, nodeID string) error {
-	return retrySQLiteBusy(ctx, func() error {
+	return s.writes.withAgentWrite(ctx, adminDeletionWriteKey, func(ctx context.Context) error {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -387,8 +419,8 @@ func (s *sqliteAdminDeletion) finalizeAdminNodeDeletion(ctx context.Context, nod
 		var historyRows int
 		if err := tx.QueryRowContext(ctx, `
 			SELECT
-				(SELECT COUNT(*) FROM state_samples WHERE node_id = ?) +
-				(SELECT COUNT(*) FROM probe_rounds WHERE node_id = ?)
+				EXISTS (SELECT 1 FROM state_samples WHERE node_id = ?) +
+				EXISTS (SELECT 1 FROM probe_rounds WHERE node_id = ?)
 		`, nodeID, nodeID).Scan(&historyRows); err != nil {
 			return err
 		}
@@ -438,7 +470,7 @@ func (s *sqliteAdminDeletion) finalizeAdminNodeDeletion(ctx context.Context, nod
 }
 
 func (s *sqliteAdminDeletion) finalizeAdminProbeTargetDeletion(ctx context.Context, targetID string) error {
-	return retrySQLiteBusy(ctx, func() error {
+	return s.writes.withAgentWrite(ctx, adminDeletionWriteKey, func(ctx context.Context) error {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return err
@@ -448,7 +480,7 @@ func (s *sqliteAdminDeletion) finalizeAdminProbeTargetDeletion(ctx context.Conte
 			return err
 		}
 		var historyRows int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM probe_rounds WHERE target_id = ?`, targetID).Scan(&historyRows); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM probe_rounds WHERE target_id = ?)`, targetID).Scan(&historyRows); err != nil {
 			return err
 		}
 		if historyRows != 0 {
@@ -481,7 +513,7 @@ func (s *sqliteAdminDeletion) finalizeAdminProbeTargetDeletion(ctx context.Conte
 
 func (s *sqliteAdminDeletion) deleteAdminRowsBatch(ctx context.Context, query string, value any) (int64, error) {
 	var removed int64
-	err := retrySQLiteBusy(ctx, func() error {
+	err := s.writes.withAgentWrite(ctx, adminDeletionWriteKey, func(ctx context.Context) error {
 		result, err := s.db.ExecContext(ctx, query, value, adminDeleteBatchSize)
 		if err != nil {
 			return err

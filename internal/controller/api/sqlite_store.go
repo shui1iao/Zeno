@@ -81,6 +81,7 @@ const (
 	sqliteBusyRetryMax         = 250 * time.Millisecond
 	historyRetentionWriteKey   = "_history_retention"
 	notificationOutboxWriteKey = "_notification_outbox"
+	adminDeletionWriteKey      = "_admin_deletion"
 )
 
 func (s *sqliteWriteState) withAgentWrite(ctx context.Context, nodeID string, operation func(context.Context) error) error {
@@ -219,7 +220,7 @@ func newSQLiteStore(db *sql.DB, telemetryStorage *telemetryStorageGuard) *SQLite
 		sqliteAdminDomain: &sqliteAdminDomain{
 			sqliteAdminAlertRules: &sqliteAdminAlertRules{db: db},
 			sqliteAdminAuth:       &sqliteAdminAuth{db: db},
-			sqliteAdminDeletion:   &sqliteAdminDeletion{db: db},
+			sqliteAdminDeletion:   &sqliteAdminDeletion{db: db, writes: writes},
 			sqliteSettings:        &sqliteSettings{db: db},
 			agentAccess:           agentAccess,
 			db:                    db,
