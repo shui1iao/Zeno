@@ -26,7 +26,7 @@ ARG TARGETVARIANT
 RUN if [ "${TARGETARCH}/${TARGETVARIANT}" = "arm/v6" ]; then export GOARM=6; fi \
   && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath -ldflags "-s -w" -o /out/zeno-controller ./cmd/controller
 
-FROM debian:13.6-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd
+FROM debian:13.7-slim@sha256:a99cfc517144bc59b1978475ec53b46ecabec7e43635402ee5b77cc54cd1b20a
 ARG VERSION=dev
 ARG REVISION=unknown
 ARG ZENO_UID=10001
