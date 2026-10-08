@@ -238,37 +238,24 @@ func (h *handler) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer releaseWrite()
-	var transition notificationStatusTransition
 	// Liveness is authoritative at the Controller receive time. The Agent
 	// timestamp is validated above, but never allowed to move last_seen_at into
 	// the future or keep a node online after its clock is corrected.
 	heartbeatTS := receivedAt
 	if transitionStore, ok := store.(heartbeatTransitionStore); ok {
-		var err error
-		transition, err = transitionStore.RecordAgentHeartbeatTransition(r.Context(), nodeID, heartbeatTS, status, strings.TrimSpace(request.AgentVersion))
-		if err != nil {
+		if _, err := transitionStore.RecordAgentHeartbeatTransition(r.Context(), nodeID, heartbeatTS, status, strings.TrimSpace(request.AgentVersion)); err != nil {
 			logAgentAPIError("heartbeat", nodeID, "record_transition", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-	} else {
-		if notificationStore, ok := store.(notificationEventStore); ok {
-			if snapshot, err := notificationStore.NotificationNode(r.Context(), nodeID); err == nil {
-				transition.Previous = snapshot
-			}
-		}
-		if err := store.RecordAgentHeartbeat(r.Context(), nodeID, heartbeatTS, status, strings.TrimSpace(request.AgentVersion)); err != nil {
-			logAgentAPIError("heartbeat", nodeID, "record", err)
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		if notificationStore, ok := store.(notificationEventStore); ok {
-			if snapshot, err := notificationStore.NotificationNode(r.Context(), nodeID); err == nil {
-				transition.Current = snapshot
-			}
-		}
+	} else if err := store.RecordAgentHeartbeat(r.Context(), nodeID, heartbeatTS, status, strings.TrimSpace(request.AgentVersion)); err != nil {
+		logAgentAPIError("heartbeat", nodeID, "record", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
 	}
-	h.dispatchAgentStatusNotification(store, transition, time.Now().UTC())
+	// The stored status is committed; let the reconcile loop compare it with
+	// what the user was last told.
+	h.wakeNotificationReconcile()
 	h.markSummaryCacheDirty()
 	h.publishSummary(r.Context())
 	writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
@@ -352,7 +339,7 @@ func (h *handler) handleAgentState(w http.ResponseWriter, r *http.Request) {
 	}
 	defer releaseWrite()
 	if reportStore, ok := store.(agentStateReportStore); ok {
-		accepted, transition, err := reportStore.RecordAgentStateReport(r.Context(), nodeID, request)
+		accepted, _, err := reportStore.RecordAgentStateReport(r.Context(), nodeID, request)
 		if err != nil {
 			if errors.Is(err, errInvalidAgentStateReport) {
 				writeError(w, http.StatusBadRequest, "invalid state report")
@@ -367,7 +354,7 @@ func (h *handler) handleAgentState(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if accepted {
-			h.dispatchAgentStatusNotification(store, transition, stateTS)
+			h.wakeNotificationReconcile()
 			h.scheduleNodeStatePublish(nodeID)
 		}
 		h.publishSummary(r.Context())
@@ -384,13 +371,12 @@ func (h *handler) handleAgentState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if transitionStore, ok := store.(stateAlertRuleTransitionStore); ok {
-		transition, err := transitionStore.RecordAgentStateAlertRuleTransition(r.Context(), nodeID, stateTS, request)
-		if err != nil {
+		if _, err := transitionStore.RecordAgentStateAlertRuleTransition(r.Context(), nodeID, stateTS, request); err != nil {
 			logAgentAPIError("state", nodeID, "record_alert_transition", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
-		h.dispatchAgentStatusNotification(store, transition, stateTS)
+		h.wakeNotificationReconcile()
 	}
 	h.publishSummary(r.Context())
 	h.scheduleNodeStatePublish(nodeID)

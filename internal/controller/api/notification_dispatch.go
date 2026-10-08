@@ -2,52 +2,24 @@ package api
 
 import (
 	"context"
-	"database/sql"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"net/http/httptrace"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"time"
 )
 
-const notificationDeliveryOutcomeUnknownMessage = "delivery outcome unknown; automatic retry suppressed"
+// notificationSendTimeout bounds one Telegram request. A response that does
+// not arrive in time is a failed (retryable) delivery, even if the request was
+// already written: the user prefers an occasional duplicate to a lost message.
+const notificationSendTimeout = 15 * time.Second
 
-var errNotificationDeliveryOutcomeUnknown = errors.New("notification delivery outcome unknown")
-
-type heartbeatTransitionStore interface {
-	RecordAgentHeartbeatTransition(ctx context.Context, nodeID string, ts time.Time, status, agentVersion string) (notificationStatusTransition, error)
-}
-
-type notificationEventStore interface {
-	NotificationNode(ctx context.Context, nodeID string) (notificationNodeSnapshot, error)
-	EnabledNotificationChannelsForEvent(ctx context.Context, eventType, nodeID string) (string, []notificationDispatchChannel, error)
-}
-
-type notificationStatusMarkStore interface {
-	ClaimStatusNotification(ctx context.Context, event notificationEvent) (bool, error)
-}
-
-type renewalNotificationQueueStore interface {
-	QueueDueRenewalNotifications(ctx context.Context, now time.Time) (int, error)
-}
-
-type notificationNodeSnapshot struct {
-	ID          string
-	DisplayName string
-	Status      string
-	PublicIPv4  string
-}
-
-type notificationStatusTransition struct {
-	Previous notificationNodeSnapshot
-	Current  notificationNodeSnapshot
-	Detail   string
-}
+const notificationTestMessageText = "Zeno：通知渠道测试"
 
 type notificationDispatchChannel struct {
 	ID                     string
@@ -59,23 +31,25 @@ type notificationDispatchChannel struct {
 	DestinationFingerprint string
 }
 
+// notificationEvent describes the admin test delivery returned by the channel
+// test endpoint.
 type notificationEvent struct {
-	EventID        string `json:"event_id,omitempty"`
-	EventType      string `json:"event_type"`
-	Label          string `json:"label"`
-	NodeID         string `json:"node_id"`
-	NodeName       string `json:"node_name"`
-	NodeIP         string `json:"node_ip,omitempty"`
-	Status         string `json:"status"`
-	PreviousStatus string `json:"previous_status"`
-	TS             string `json:"ts"`
-	Detail         string `json:"detail,omitempty"`
+	EventType      string
+	Label          string
+	NodeID         string
+	NodeName       string
+	Status         string
+	PreviousStatus string
+	TS             string
 }
 
 type notificationSender interface {
-	Send(ctx context.Context, channel notificationDispatchChannel, event notificationEvent) error
+	Send(ctx context.Context, channel notificationDispatchChannel, text string) error
 }
 
+// automaticNotificationsAllowed is the global gate. The sender is nil when
+// ZENO_NOTIFICATIONS_DISABLED is set or the external notification authority
+// does not match this database.
 func (h *handler) automaticNotificationsAllowed() bool {
 	return h != nil && h.notificationSender != nil
 }
@@ -87,7 +61,7 @@ type httpNotificationSender struct {
 
 func newHTTPNotificationSender(client *http.Client, telegramAPIBaseURL string) notificationSender {
 	if client == nil {
-		client = &http.Client{Timeout: 5 * time.Second}
+		client = &http.Client{Timeout: notificationSendTimeout}
 	}
 	telegramAPIBaseURL = strings.TrimRight(strings.TrimSpace(telegramAPIBaseURL), "/")
 	if telegramAPIBaseURL == "" {
@@ -96,14 +70,20 @@ func newHTTPNotificationSender(client *http.Client, telegramAPIBaseURL string) n
 	return httpNotificationSender{client: client, telegramAPIBaseURL: telegramAPIBaseURL}
 }
 
-func (sender httpNotificationSender) Send(ctx context.Context, channel notificationDispatchChannel, event notificationEvent) error {
+// telegramRateLimitError carries Telegram's parameters.retry_after so the
+// channel waits exactly as long as Telegram asked.
+type telegramRateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (err telegramRateLimitError) Error() string {
+	return fmt.Sprintf("telegram rate limited; retry after %ds", int64(err.RetryAfter/time.Second))
+}
+
+func (sender httpNotificationSender) Send(ctx context.Context, channel notificationDispatchChannel, text string) error {
 	if channel.Type != "" && strings.ToLower(strings.TrimSpace(channel.Type)) != "telegram" {
 		return fmt.Errorf("unsupported notification channel type")
 	}
-	return sender.sendTelegram(ctx, channel, event)
-}
-
-func (sender httpNotificationSender) sendTelegram(ctx context.Context, channel notificationDispatchChannel, event notificationEvent) error {
 	botCredential := strings.TrimSpace(channel.Credential)
 	chatID := strings.TrimSpace(channel.Destination)
 	if botCredential == "" || chatID == "" {
@@ -112,71 +92,74 @@ func (sender httpNotificationSender) sendTelegram(ctx context.Context, channel n
 	endpoint := sender.telegramAPIBaseURL + "/bot" + url.PathEscape(botCredential) + "/sendMessage"
 	form := url.Values{}
 	form.Set("chat_id", chatID)
-	form.Set("text", event.messageText())
+	form.Set("text", text)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("User-Agent", "Zeno-Controller")
-	var requestWritten atomic.Bool
-	trace := &httptrace.ClientTrace{
-		WroteRequest: func(info httptrace.WroteRequestInfo) {
-			if info.Err == nil {
-				requestWritten.Store(true)
-			}
-		},
-	}
-	request = request.WithContext(httptrace.WithClientTrace(request.Context(), trace))
 	response, err := sender.client.Do(request)
 	if err != nil {
-		// Once the full request has left this process, Telegram may already have
-		// accepted and delivered the message even if its response times out. The
-		// Bot API has no idempotency key, so an automatic retry can duplicate it.
-		if requestWritten.Load() {
-			return fmt.Errorf("%w: %v", errNotificationDeliveryOutcomeUnknown, err)
-		}
 		return err
 	}
 	defer response.Body.Close()
-	_, _ = io.Copy(io.Discard, response.Body)
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	if response.StatusCode == http.StatusTooManyRequests {
+		return telegramRateLimitError{RetryAfter: telegramRetryAfter(body)}
+	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("telegram returned status %d", response.StatusCode)
 	}
 	return nil
 }
 
-func (event notificationEvent) messageText() string {
-	nodeName := notificationNodeLabel(event)
-	switch event.EventType {
-	case "test_notification":
-		return "Zeno：通知渠道测试"
-	case "node_offline":
-		if event.Status == "online" && event.PreviousStatus == "offline" {
-			return fmt.Sprintf("🟢[恢复] %s", nodeName)
-		}
-		return fmt.Sprintf("🔴[离线] %s", nodeName)
-	case "probe_unhealthy":
-		detail := strings.TrimSpace(event.Detail)
-		if event.Status == "online" && event.PreviousStatus == "warning" {
-			if detail == "" {
-				detail = "状态恢复正常"
-			}
-			return fmt.Sprintf("🟢[恢复] %s%s", nodeName, detail)
-		}
-		if detail == "" {
-			detail = "状态异常"
-		}
-		return fmt.Sprintf("⚠️[警告] %s%s", nodeName, detail)
-	case "renewal_due":
-		detail := strings.TrimSpace(event.Detail)
-		if detail != "" {
-			return renewalDueMessageText(nodeName, detail)
-		}
-		return fmt.Sprintf("⚠️[到期] %s 即将到期", nodeName)
-	default:
-		return fmt.Sprintf("Zeno：%s %s", nodeName, event.Label)
+func telegramRetryAfter(body []byte) time.Duration {
+	var payload struct {
+		Parameters struct {
+			RetryAfter int64 `json:"retry_after"`
+		} `json:"parameters"`
 	}
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Parameters.RetryAfter <= 0 {
+		return 0
+	}
+	return time.Duration(payload.Parameters.RetryAfter) * time.Second
+}
+
+// notificationDestinationFingerprint identifies a channel's routing target.
+// Together with delivery_version it forms the binding recorded on every
+// notification state row.
+func notificationDestinationFingerprint(channelType, destination string) string {
+	channelType = strings.ToLower(strings.TrimSpace(channelType))
+	if channelType == "" {
+		channelType = "telegram"
+	}
+	sum := sha256.Sum256([]byte(channelType + "\x00" + strings.TrimSpace(destination)))
+	return hex.EncodeToString(sum[:])
+}
+
+func notificationNodeLabel(nodeName, nodeID, nodeIP string) string {
+	nodeName = strings.TrimSpace(nodeName)
+	if nodeName == "" {
+		nodeName = nodeID
+	}
+	if maskedIP := maskIPv4(nodeIP); maskedIP != "" {
+		return fmt.Sprintf("%s(%s)", nodeName, maskedIP)
+	}
+	return nodeName
+}
+
+func maskIPv4(value string) string {
+	parts := strings.Split(strings.TrimSpace(value), ".")
+	if len(parts) != 4 {
+		return ""
+	}
+	for _, part := range parts {
+		if part == "" {
+			return ""
+		}
+	}
+	return parts[0] + "." + parts[1] + ".***.***"
 }
 
 func renewalDueMessageText(nodeName, detail string) string {
@@ -216,156 +199,16 @@ func formatRenewalMessageDate(value string) string {
 	return fmt.Sprintf("%d-%d-%d", year, int(month), day)
 }
 
-func notificationNodeLabel(event notificationEvent) string {
-	nodeName := strings.TrimSpace(event.NodeName)
-	if nodeName == "" {
-		nodeName = event.NodeID
-	}
-	if maskedIP := maskIPv4(event.NodeIP); maskedIP != "" {
-		return fmt.Sprintf("%s(%s)", nodeName, maskedIP)
-	}
-	return nodeName
-}
-
-func maskIPv4(value string) string {
-	parts := strings.Split(strings.TrimSpace(value), ".")
-	if len(parts) != 4 {
-		return ""
-	}
-	for _, part := range parts {
-		if part == "" {
-			return ""
-		}
-	}
-	return parts[0] + "." + parts[1] + ".***.***"
-}
-
-func (h *handler) dispatchNotificationEvent(store agentStore, event notificationEvent) bool {
-	if strings.TrimSpace(event.EventType) == "" || h.notificationSender == nil || !h.automaticNotificationsAllowed() {
-		return false
-	}
-	notificationStore, ok := store.(notificationEventStore)
-	if !ok {
-		return false
-	}
-	label, channels, err := notificationStore.EnabledNotificationChannelsForEvent(context.Background(), event.EventType, event.NodeID)
-	if err != nil || len(channels) == 0 {
-		if err != nil {
-			log.Printf("notification channel lookup failed event_id=%s event_type=%s node_id=%s: %v", notificationEventStableID(event), event.EventType, event.NodeID, err)
-		}
-		return false
-	}
-	if event.Label == "" {
-		event.Label = label
-	}
-	if outboxStore, ok := store.(notificationOutboxStore); ok {
-		queued, err := outboxStore.QueueNotificationEvent(context.Background(), event, channels)
-		if err != nil {
-			log.Printf("notification outbox queue failed event_id=%s event_type=%s node_id=%s: %v", notificationEventStableID(event), event.EventType, event.NodeID, err)
-			h.wakeNotificationOutbox()
-			return false
-		}
-		// A false queue result can mean the transition was already claimed by an
-		// atomic store-side queue path. Wake the single outbox worker either way so
-		// pre-queued deliveries do not wait for the periodic scan.
-		h.wakeNotificationOutbox()
-		return queued
-	}
-	if shouldClaimStatusNotification(event) {
-		if markStore, ok := store.(notificationStatusMarkStore); ok {
-			claimed, err := markStore.ClaimStatusNotification(context.Background(), event)
-			if err != nil || !claimed {
-				return false
-			}
-		}
-	}
-	for _, channel := range channels {
-		channel := channel
-		event := event
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = h.notificationSender.Send(ctx, channel, event)
-		}()
-	}
-	return true
-}
-
-func (h *handler) dispatchAgentStatusNotification(store agentStore, transition notificationStatusTransition, ts time.Time) {
-	event, ok := notificationEventForStatusTransition(transition, ts)
-	if !ok || h.notificationSender == nil {
-		return
-	}
-	h.dispatchNotificationEvent(store, event)
-}
-
-func notificationEventForStatusTransition(transition notificationStatusTransition, ts time.Time) (notificationEvent, bool) {
-	eventType, ok := notificationEventTypeForStatusChange(transition.Previous.Status, transition.Current.Status)
-	if !ok {
-		return notificationEvent{}, false
-	}
-	node := transition.Current
-	if node.ID == "" {
-		node = transition.Previous
-	}
-	return notificationEvent{
-		EventType:      eventType,
-		NodeID:         node.ID,
-		NodeName:       node.DisplayName,
-		NodeIP:         node.PublicIPv4,
-		Status:         transition.Current.Status,
-		PreviousStatus: transition.Previous.Status,
-		TS:             ts.UTC().Format(time.RFC3339),
-		Detail:         transition.Detail,
-	}, true
-}
-
-func (h *handler) runRenewalNotificationScanner(ctx context.Context, interval time.Duration) {
-	if interval <= 0 {
-		return
-	}
-	h.queueDueRenewalNotifications(ctx, time.Now().UTC())
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case now := <-ticker.C:
-			h.queueDueRenewalNotifications(ctx, now.UTC())
-		}
-	}
-}
-
-func (h *handler) queueDueRenewalNotifications(ctx context.Context, now time.Time) int {
-	if !h.automaticNotificationsAllowed() {
-		return 0
-	}
-	store, ok := h.store.(renewalNotificationQueueStore)
-	if !ok {
-		return 0
-	}
-	queued, err := store.QueueDueRenewalNotifications(ctx, now)
-	if err != nil {
-		log.Printf("renewal notification scan failed: %v", err)
-		return 0
-	}
-	if queued > 0 {
-		h.wakeNotificationOutbox()
-	}
-	return queued
-}
-
-func shouldClaimStatusNotification(event notificationEvent) bool {
-	return strings.TrimSpace(event.NodeID) != "" && strings.TrimSpace(event.Status) != "" && strings.TrimSpace(event.PreviousStatus) != ""
-}
-
 func sanitizeNotificationDeliveryError(err error) string {
 	if err == nil {
 		return ""
 	}
-	if errors.Is(err, errNotificationDeliveryOutcomeUnknown) {
-		return notificationDeliveryOutcomeUnknownMessage
+	var rateLimited telegramRateLimitError
+	if errors.As(err, &rateLimited) {
+		return rateLimited.Error()
+	}
+	if errors.Is(err, errNotificationCredentialUnavailable) {
+		return "notification credential unavailable"
 	}
 	message := strings.TrimSpace(err.Error())
 	if message == "" {
@@ -385,142 +228,4 @@ func sanitizeNotificationDeliveryError(err error) string {
 		message = message[:200]
 	}
 	return message
-}
-
-func notificationEventTypeForStatusChange(previousStatus, currentStatus string) (string, bool) {
-	previousStatus = strings.TrimSpace(previousStatus)
-	currentStatus = strings.TrimSpace(currentStatus)
-	if previousStatus == currentStatus {
-		return "", false
-	}
-	switch currentStatus {
-	case "online":
-		if previousStatus == "offline" {
-			return "node_offline", true
-		}
-		if previousStatus == "warning" {
-			return "probe_unhealthy", true
-		}
-		return "", false
-	case "offline":
-		return "node_offline", true
-	case "warning":
-		return "probe_unhealthy", true
-	default:
-		return "", false
-	}
-}
-
-func (s *sqliteNotificationDomain) NotificationNode(ctx context.Context, nodeID string) (notificationNodeSnapshot, error) {
-	var snapshot notificationNodeSnapshot
-	var storedStatus string
-	var lastSeenAt sql.NullInt64
-	var offlineDurationSec sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT n.id, n.display_name, n.status, n.last_seen_at, COALESCE(n.public_ipv4, ''),
-		       COALESCE((
-		         SELECT MAX(ar.duration_sec)
-		         FROM alert_rules ar
-		         WHERE ar.notification_event_type = 'node_offline'
-		           AND (
-		             NOT EXISTS (SELECT 1 FROM alert_rule_node_scopes scope_all WHERE scope_all.rule_id = ar.id)
-		             OR EXISTS (SELECT 1 FROM alert_rule_node_scopes scope_node WHERE scope_node.rule_id = ar.id AND scope_node.node_id = n.id)
-		           )
-		       ), ?) AS offline_duration_sec
-		FROM nodes n
-		WHERE n.id = ? AND n.disabled = 0
-	`, int64(nodeHeartbeatOfflineAfter/time.Second), nodeID).Scan(&snapshot.ID, &snapshot.DisplayName, &storedStatus, &lastSeenAt, &snapshot.PublicIPv4, &offlineDurationSec); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return notificationNodeSnapshot{}, errNodeNotFound
-		}
-		return notificationNodeSnapshot{}, err
-	}
-	snapshot.Status = publicNodeStatusAfter(storedStatus, lastSeenAt, time.Now().UTC(), nodeOfflineAfterFromSeconds(offlineDurationSec))
-	return snapshot, nil
-}
-
-func (s *sqliteNotificationDomain) EnabledNotificationChannelsForEvent(ctx context.Context, eventType, nodeID string) (string, []notificationDispatchChannel, error) {
-	label, ok := adminNotificationTypeLabel(eventType)
-	if !ok {
-		return "", nil, errNotificationTypeNotFound
-	}
-	var enabledRuleCount int
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM alert_rules ar
-		WHERE ar.notification_event_type = ?
-		  AND ar.enabled = 1
-		  AND (
-		    ? = ''
-		    OR NOT EXISTS (SELECT 1 FROM alert_rule_node_scopes scope_all WHERE scope_all.rule_id = ar.id)
-		    OR EXISTS (SELECT 1 FROM alert_rule_node_scopes scope_node WHERE scope_node.rule_id = ar.id AND scope_node.node_id = ?)
-		  )
-	`, eventType, strings.TrimSpace(nodeID), strings.TrimSpace(nodeID)).Scan(&enabledRuleCount); err != nil {
-		return "", nil, err
-	}
-	if enabledRuleCount == 0 {
-		return label, nil, nil
-	}
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, destination, credential
-		FROM notification_channels
-		WHERE enabled = 1 AND TRIM(credential) <> ''
-		ORDER BY id ASC
-	`)
-	if err != nil {
-		return "", nil, err
-	}
-	defer rows.Close()
-	channels := make([]notificationDispatchChannel, 0)
-	for rows.Next() {
-		var channel notificationDispatchChannel
-		var storedCredential string
-		if err := rows.Scan(&channel.ID, &channel.Name, &channel.Destination, &storedCredential); err != nil {
-			return "", nil, err
-		}
-		credential, err := s.decryptNotificationCredentialFromStorage(channel.ID, "telegram", storedCredential)
-		if err != nil {
-			return "", nil, err
-		}
-		channel.Type = "telegram"
-		channel.Credential = credential
-		channels = append(channels, channel)
-	}
-	if err := rows.Err(); err != nil {
-		return "", nil, err
-	}
-	return label, channels, nil
-}
-
-func (s *sqliteNotificationDomain) ClaimStatusNotification(ctx context.Context, event notificationEvent) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return false, err
-	}
-	defer func() { rollbackUnlessCommitted(tx) }()
-	claimed, err := claimStatusNotificationTx(ctx, tx, event)
-	if err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	tx = nil
-	return claimed, nil
-}
-
-func activeStatusNotificationMark(status string) string {
-	status = strings.TrimSpace(status)
-	if status == "" || status == "online" {
-		return ""
-	}
-	return "status-active:" + status
-}
-
-func recoveredStatusNotificationMark(status string) string {
-	status = strings.TrimSpace(status)
-	if status == "" || status == "online" {
-		return ""
-	}
-	return "status-recovered:" + status
 }

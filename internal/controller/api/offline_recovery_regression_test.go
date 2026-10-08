@@ -60,19 +60,6 @@ func assertOfflineIncidentRecovered(t *testing.T, store *SQLiteStore) {
 	if active != 0 {
 		t.Fatalf("offline alert state active = %d, want 0", active)
 	}
-	var activeMarks, recoveredMarks int
-	if err := store.db.QueryRowContext(ctx, `
-		SELECT
-			SUM(CASE WHEN mark = 'status-active:offline' THEN 1 ELSE 0 END),
-			SUM(CASE WHEN mark = 'status-recovered:offline' THEN 1 ELSE 0 END)
-		FROM notification_event_marks
-		WHERE event_type = 'node_offline' AND node_id = 'example-node-a'
-	`).Scan(&activeMarks, &recoveredMarks); err != nil {
-		t.Fatalf("query offline incident marks: %v", err)
-	}
-	if activeMarks != 0 || recoveredMarks != 1 {
-		t.Fatalf("offline incident marks active=%d recovered=%d, want 0/1", activeMarks, recoveredMarks)
-	}
 }
 
 func TestAgentStateReconcilesOfflineIncidentWithoutStandaloneRecoveryWhenAlertWasNotDelivered(t *testing.T) {
@@ -89,7 +76,11 @@ func TestAgentStateReconcilesOfflineIncidentWithoutStandaloneRecoveryWhenAlertWa
 
 	telegram := newTelegramTestCapture(t)
 	h := &handler{store: store, notificationSender: newHTTPNotificationSender(telegram.server.Client(), telegram.server.URL), liveHub: newLiveUpdateHub(), presence: newAgentPresenceManager()}
+	// The user was never told about this offline incident (the stored status
+	// is online), so reconciling after the state report sends nothing.
+	h.reconcileNotifications(ctx)
 	postAgentState(t, h.handleAgentState, time.Now().UTC().Unix(), 22.5)
+	h.reconcileNotifications(ctx)
 	_, forms, errors := telegram.waitForCalls(t, 0)
 	if len(errors) != 0 || len(forms) != 0 {
 		t.Fatalf("recovery was not held for stability: forms=%+v errors=%+v", forms, errors)
@@ -117,18 +108,6 @@ func TestAgentHeartbeatReconcilesOfflineIncidentAfterStoredStatusWasSilentlyOnli
 	}
 	if active != 0 {
 		t.Fatalf("offline alert state active = %d, want 0", active)
-	}
-}
-
-func TestRecoveryNotificationRequiresAnActiveIncidentMark(t *testing.T) {
-	store := openOfflineRecoveryTestStore(t)
-	event := notificationEvent{EventType: "node_offline", NodeID: "example-node-a", NodeName: "Example Node A", PreviousStatus: "offline", Status: "online"}
-	queued, err := store.QueueNotificationEvent(context.Background(), event, []notificationDispatchChannel{{ID: "ops", Name: "Ops", Destination: "7579942307", Credential: "token", Type: "telegram"}})
-	if err != nil {
-		t.Fatalf("queue recovery: %v", err)
-	}
-	if queued {
-		t.Fatalf("recovery queued without an active offline incident")
 	}
 }
 

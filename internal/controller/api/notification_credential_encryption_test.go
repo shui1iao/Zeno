@@ -1,17 +1,13 @@
 package api
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -220,50 +216,6 @@ func TestNotificationCredentialMissingAndWrongKeyFailClosed(t *testing.T) {
 	}
 }
 
-func TestNotificationCredentialDamagedCiphertextDoesNotSendOrLeakLogs(t *testing.T) {
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "zeno.db"))
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
-	defer store.Close()
-	enableTestNotificationCredentialEncryption(t, store)
-	ctx := context.Background()
-	enabled := true
-	channel, err := store.CreateAdminNotificationChannel(ctx, AdminNotificationChannelCreateRequest{ID: "ops", Name: "Ops", Destination: "7579942307", Credential: "telegram-bot-secret-value", Enabled: &enabled})
-	if err != nil {
-		t.Fatalf("create channel: %v", err)
-	}
-	event := notificationEvent{EventType: "node_offline", Label: "离线", TS: time.Now().UTC().Format(time.RFC3339)}
-	if queued, err := store.QueueNotificationEvent(ctx, event, []notificationDispatchChannel{{ID: channel.ID, Name: channel.Name, Destination: channel.Destination, Type: "telegram"}}); err != nil || !queued {
-		t.Fatalf("queue notification event queued=%v err=%v", queued, err)
-	}
-	corruptedCredential := notificationCredentialCiphertextPrefix + base64.RawURLEncoding.EncodeToString([]byte("damaged-ciphertext-payload"))
-	if _, err := store.db.ExecContext(ctx, `UPDATE notification_channels SET credential = ? WHERE id = ?`, corruptedCredential, channel.ID); err != nil {
-		t.Fatalf("corrupt stored credential: %v", err)
-	}
-
-	var logs bytes.Buffer
-	previousWriter := log.Writer()
-	log.SetOutput(&logs)
-	defer log.SetOutput(previousWriter)
-	sender := &recordingNotificationSender{}
-	h := &handler{store: store, notificationSender: sender}
-	h.dispatchPendingNotificationDeliveries(context.Background())
-
-	if sender.calls() != 0 {
-		t.Fatalf("sender was called despite damaged credential")
-	}
-	logText := logs.String()
-	if !strings.Contains(logText, "notification outbox fetch failed") {
-		t.Fatalf("log %q missing outbox fetch failure", logText)
-	}
-	for _, secret := range []string{"telegram-bot-secret-value", corruptedCredential} {
-		if strings.Contains(logText, secret) {
-			t.Fatalf("notification error log leaked credential material %q in %s", secret, logText)
-		}
-	}
-}
-
 func TestNotificationCredentialCreateRequiresConfiguredKey(t *testing.T) {
 	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "zeno.db"))
 	if err != nil {
@@ -274,24 +226,6 @@ func TestNotificationCredentialCreateRequiresConfiguredKey(t *testing.T) {
 	if _, err := store.CreateAdminNotificationChannel(context.Background(), AdminNotificationChannelCreateRequest{ID: "ops", Name: "Ops", Destination: "7579942307", Credential: "telegram-bot-secret-value", Enabled: &enabled}); !errors.Is(err, errNotificationCredentialKeyRequired) {
 		t.Fatalf("create without key error = %v, want key required", err)
 	}
-}
-
-type recordingNotificationSender struct {
-	mu        sync.Mutex
-	callCount int
-}
-
-func (sender *recordingNotificationSender) Send(context.Context, notificationDispatchChannel, notificationEvent) error {
-	sender.mu.Lock()
-	defer sender.mu.Unlock()
-	sender.callCount++
-	return nil
-}
-
-func (sender *recordingNotificationSender) calls() int {
-	sender.mu.Lock()
-	defer sender.mu.Unlock()
-	return sender.callCount
 }
 
 func storedNotificationCredential(t *testing.T, store *SQLiteStore, channelID string) string {

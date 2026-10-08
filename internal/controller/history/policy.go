@@ -20,10 +20,6 @@ const (
 	// RollupRetention bounds the aggregated tiers.
 	RollupRetention = 30 * 24 * time.Hour
 
-	// StalePendingNotificationDeliveryAfter expires deliveries that never
-	// reached a terminal state.
-	StalePendingNotificationDeliveryAfter = 7 * 24 * time.Hour
-
 	// BatchSize is the row budget of a single delete or compaction batch.
 	BatchSize = 1000
 
@@ -92,10 +88,8 @@ type Cutoffs struct {
 	// LatencyRollup and StateRollup bound the aggregated tiers.
 	LatencyRollup int64
 	StateRollup   int64
-	// NotificationHistory bounds terminal delivery rows.
+	// NotificationHistory bounds notification log rows.
 	NotificationHistory int64
-	// StalePendingNotification expires deliveries stuck before delivery.
-	StalePendingNotification int64
 	// Now is the pass timestamp, reused for update stamps.
 	Now int64
 }
@@ -105,12 +99,11 @@ func CutoffsAt(now time.Time) Cutoffs {
 	now = now.UTC()
 	retention := now.Add(-RollupRetention).Unix()
 	return Cutoffs{
-		Raw:                      now.Add(-RawRetention).Unix(),
-		LegacyRaw:                retention,
-		LatencyRollup:            BucketFloor(retention, LatencyRollupStep),
-		StateRollup:              BucketFloor(retention, StateRollupStep),
-		NotificationHistory:      retention,
-		StalePendingNotification: now.Add(-StalePendingNotificationDeliveryAfter).Unix(),
-		Now:                      now.Unix(),
+		Raw:                 now.Add(-RawRetention).Unix(),
+		LegacyRaw:           retention,
+		LatencyRollup:       BucketFloor(retention, LatencyRollupStep),
+		StateRollup:         BucketFloor(retention, StateRollupStep),
+		NotificationHistory: retention,
+		Now:                 now.Unix(),
 	}
 }

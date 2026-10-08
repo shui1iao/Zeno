@@ -61,7 +61,7 @@ func TestFormatExpiryDaysLabelUsesZeroDaysInsteadOfToday(t *testing.T) {
 	}
 }
 
-func TestPendingRenewalNotificationsSkipsPermanentNode(t *testing.T) {
+func TestRenewalNotificationKeySkipsPermanentNode(t *testing.T) {
 	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "zeno.db"))
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
@@ -80,12 +80,16 @@ func TestPendingRenewalNotificationsSkipsPermanentNode(t *testing.T) {
 	if _, err := store.UpdateAdminAlertRule(ctx, "renewal_due", AdminAlertRuleUpdateRequest{Enabled: &enabled}); err != nil {
 		t.Fatalf("enable renewal rule: %v", err)
 	}
-	events, err := store.PendingRenewalNotifications(ctx, time.Now().UTC())
+	snapshot, err := store.NotificationReconcileSnapshot(ctx, time.Now().UTC())
 	if err != nil {
-		t.Fatalf("list pending renewal notifications: %v", err)
+		t.Fatalf("notification snapshot: %v", err)
 	}
-	if len(events) != 0 {
-		t.Fatalf("permanent node produced renewal events: %+v", events)
+	for _, node := range snapshot.Nodes {
+		for _, now := range []time.Time{time.Now().UTC(), time.Now().UTC().Add(24 * time.Hour)} {
+			if key := renewalNotificationKeyAt(node, snapshot.rulesFor("renewal_due", node.ID), now, true); key != "" {
+				t.Fatalf("permanent node %s produced renewal key %q", node.ID, key)
+			}
+		}
 	}
 }
 

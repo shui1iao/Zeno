@@ -28,11 +28,6 @@ type AdminNotificationTestResponse struct {
 	Delivery AdminNotificationDelivery `json:"delivery"`
 }
 
-type AdminNotificationRetryResponse struct {
-	DeliveryID int64  `json:"delivery_id"`
-	State      string `json:"state"`
-}
-
 type AdminNotificationChannelCreateRequest struct {
 	ID          string `json:"id,omitempty"`
 	Name        string `json:"name"`

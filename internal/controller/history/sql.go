@@ -64,21 +64,8 @@ const (
 	// PruneExpiredStateRollupsSQL trims the state rollup tier.
 	PruneExpiredStateRollupsSQL = `DELETE FROM state_history_rollups WHERE rowid IN (SELECT rowid FROM state_history_rollups WHERE bucket_start < ? ORDER BY bucket_start LIMIT ?)`
 
-	// PruneTerminalNotificationDeliveriesSQL trims delivered/failed history.
-	PruneTerminalNotificationDeliveriesSQL = `DELETE FROM notification_deliveries WHERE id IN (SELECT id FROM notification_deliveries WHERE state IN ('delivered', 'failed', 'canceled') AND updated_at < ? ORDER BY id LIMIT ?)`
-
-	// ExpirePendingNotificationDeliveriesSQL fails deliveries that never
-	// reached a terminal state. Arguments are (now, cutoff, limit).
-	ExpirePendingNotificationDeliveriesSQL = `
-				UPDATE notification_deliveries
-				SET state = 'failed', last_error = 'expired before delivery', lease_until = 0, claim_token = '', updated_at = ?
-				WHERE id IN (
-					SELECT id FROM notification_deliveries
-					WHERE state IN ('pending', 'leased') AND created_at < ?
-					ORDER BY id
-					LIMIT ?
-				)
-			`
+	// PruneNotificationLogSQL trims notification log history.
+	PruneNotificationLogSQL = `DELETE FROM notification_log WHERE id IN (SELECT id FROM notification_log INDEXED BY idx_notification_log_ts WHERE ts < ? ORDER BY ts, id LIMIT ?)`
 
 	// LatencyRollupInsertSQL folds a bounded batch of raw probe rounds into
 	// weighted latency buckets. Arguments are (cutoff, limit, step, step).

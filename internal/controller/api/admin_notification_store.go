@@ -113,7 +113,7 @@ func (s *sqliteNotificationDomain) UpdateAdminNotificationChannel(ctx context.Co
 	if err != nil {
 		return AdminNotificationChannel{}, err
 	}
-	patch, routingChanged, disabling := buildNotificationChannelUpdatePatch(update, encryptedCredential, currentDestination, currentVersion)
+	patch := buildNotificationChannelUpdatePatch(update, encryptedCredential, currentDestination, currentVersion)
 	if patch.empty() {
 		return AdminNotificationChannel{}, errInvalidAdminNotificationChannelWrite
 	}
@@ -130,10 +130,6 @@ func (s *sqliteNotificationDomain) UpdateAdminNotificationChannel(ctx context.Co
 	}
 	if affected != 1 {
 		return AdminNotificationChannel{}, errNotificationChannelNotFound
-	}
-
-	if err := cancelSupersededNotificationDeliveriesTx(ctx, tx, channelID, routingChanged, disabling, nowUnix); err != nil {
-		return AdminNotificationChannel{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return AdminNotificationChannel{}, err
@@ -160,7 +156,7 @@ func notificationChannelRoutingStateTx(ctx context.Context, tx *sql.Tx, channelI
 	return destination, version, nil
 }
 
-func buildNotificationChannelUpdatePatch(update AdminNotificationChannelUpdateRequest, encryptedCredential, currentDestination string, currentVersion int64) (*sqlPatch, bool, bool) {
+func buildNotificationChannelUpdatePatch(update AdminNotificationChannelUpdateRequest, encryptedCredential, currentDestination string, currentVersion int64) *sqlPatch {
 	patch := newSQLPatch(8)
 	patch.addString("name", update.Name)
 	patch.addString("destination", update.Destination)
@@ -175,33 +171,13 @@ func buildNotificationChannelUpdatePatch(update AdminNotificationChannelUpdateRe
 		if update.Destination != nil {
 			newDestination = *update.Destination
 		}
-		// Version and fingerprint move together: consumers use the pair to
-		// detect that a queued payload targets a superseded destination.
+		// Version and fingerprint move together: the reconcile loop silently
+		// re-baselines a channel whose routing binding changed, so a new
+		// recipient is never told about an older incident.
 		patch.set("delivery_version", currentVersion+1)
 		patch.set("destination_fingerprint", notificationDestinationFingerprint("telegram", newDestination))
 	}
-	disabling := update.Enabled != nil && !*update.Enabled
-	return patch, routingChanged, disabling
-}
-
-func cancelSupersededNotificationDeliveriesTx(ctx context.Context, tx *sql.Tx, channelID string, routingChanged, disabling bool, nowUnix int64) error {
-	if !routingChanged && !disabling {
-		return nil
-	}
-	reason := "notification channel changed"
-	if disabling && !routingChanged {
-		reason = "notification channel disabled"
-	}
-	// Old generations are terminal. A later re-enable or id reuse cannot
-	// silently send their payload to a different destination/credential.
-	_, err := tx.ExecContext(ctx, `
-		UPDATE notification_deliveries
-		SET state = 'canceled', last_error = ?, lease_until = 0,
-		    claim_token = '', request_started_at = 0, updated_at = ?
-		WHERE channel_id = ?
-		  AND state IN ('pending', 'paused', 'failed', 'leased')
-	`, reason, nowUnix, channelID)
-	return err
+	return patch
 }
 
 func (s *sqliteNotificationDomain) DeleteAdminNotificationChannel(ctx context.Context, channelID string) error {
@@ -214,14 +190,7 @@ func (s *sqliteNotificationDomain) DeleteAdminNotificationChannel(ctx context.Co
 		return err
 	}
 	defer func() { rollbackUnlessCommitted(tx) }()
-	nowUnix := time.Now().UTC().Unix()
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE notification_deliveries
-		SET state = 'canceled', last_error = 'notification channel deleted',
-		    lease_until = 0, claim_token = '', request_started_at = 0, updated_at = ?
-		WHERE channel_id = ?
-		  AND state IN ('pending', 'paused', 'failed', 'leased')
-	`, nowUnix, channelID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM notification_states WHERE channel_id = ?`, channelID); err != nil {
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM notification_channels WHERE id = ?`, channelID)

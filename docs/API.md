@@ -504,6 +504,8 @@ X-Admin-Token: <admin-token>
 }
 ```
 
+`sqlite.outbox_*` 字段为兼容保留：`outbox_pending` 是 `notification_states` 中有待送达目标的行数，`outbox_failed` 是其中当前目标至少失败过一次的行数，`outbox_leased` 恒为 0。
+
 `*_approx` 使用主键/rowid 范围做常数级估算，历史清理产生间隙时可能高于实际行数；这样不会为了展示观测数据扫描数百万行活动数据库。
 
 ### GET /api/admin/v1/settings
@@ -804,7 +806,7 @@ Controller 会在 Agent 上报时实际使用这些规则：
 - 资源规则命中状态会记录在 Controller 内部的 `alert_rule_states` 表，用来避免某一类健康上报误清另一类仍活跃的异常；`alert_rule_states` 只作为 Controller 内部命中状态存储。
 - 如果规则配置了 `scope_node_ids`，Agent 上报、规则命中和通知发送都会只对这些服务器生效；空数组表示全部服务器。离线规则的 `duration_sec` 同时作为公共在线/离线状态与离线通知的心跳超时时间，默认 60 秒；presence WebSocket 和服务探测结果不覆盖页面在线状态；Controller 启动后先留出一个完整心跳窗口，再每 5 秒补扫一次过期 `last_seen_at`，把漏掉的离线状态落库并进入同一条 `node_offline` 通知链路。
 - 续费规则的 `renewal_days` 是去重后的提前提醒天数数组，支持 `1`、`3`、`7`、`15` 和 `30`；每个选中时间点只触发一次，`30` 按自然月计算。兼容字段 `threshold` 保存数组中的最大值，旧客户端仍可只提交单个 `threshold`。
-- 通知发送同时要求：状态转换存在、对应通知类型启用、至少一条映射到该事件类型且对该服务器生效的规则启用、且存在启用并配置好的通知渠道。
+- 通知发送同时要求：真实状态与已通知状态不一致、至少一条映射到该事件类型且对该服务器生效的规则启用、服务器未停用、且存在启用并配置好的通知渠道。详见下文“通知发送”。
 
 ```json
 {
@@ -974,14 +976,27 @@ Telegram 通知渠道管理列表。Zeno 当前只支持 Telegram 一个通知�
 
 ## 通知发送
 
-状态类发送逻辑挂在 Agent 状态变化、资源状态上报和探测结果上报之后：
+通知采用“对账”模型。每个（渠道、节点、类别）只记录“已告诉用户的状态”（`notification_states.notified`）；真实状态每次都从权威数据读取：
 
-- 非 `offline` → `offline`：触发 `node_offline`。
-- 非 `warning` → `warning`：触发 `probe_unhealthy`。
+- `node_offline`：已存储的 `nodes.status`。`offline` 对应离线，`online`/`warning` 对应在线，`no_data` 等其他值跳过。不按 `last_seen_at` 现推状态；过期离线由 stale 扫描写入 `nodes.status`。
+- `probe_unhealthy`：与 `aggregateAlertRuleStatus` 相同的资源规则命中条件（CPU/内存/硬盘），只比较 warning/ok；warning 期间命中规则集合变化不发消息。
+- `renewal_due`：当前到期日下所有已到提醒日（UTC 日期）的提醒点中最新的一个，记作 `<dueDate>#<threshold>`；变成新的非空值时发一条，变成空值（永久、删除到期日）时静默更新；到期日已过且未轮转时不重复提醒。
+
+Controller 只有一个对账 goroutine，每 2 秒一轮，Agent heartbeat/state、stale 离线扫描、presence 检查在状态写库提交后非阻塞唤醒它。每轮比较 `notified` 与真实状态：
+
+- 告警方向（变离线、变 warning、新的续费提醒点）立即发送；恢复方向要求真实状态连续保持该节点作用域内、该类别已启用规则的 `MAX(duration_sec)`（离线默认 60 秒、资源默认 300 秒），保持期内回到原状态则静默清除。
+- 消息总是按发送当时的真实状态生成；只有 Telegram 明确成功才推进 `notified`。任何失败（包括请求已写出但没收到回执）都算未送达，下一轮重发，宁可重复不可遗漏。发送超时 15 秒；按渠道退避 2、5、15、30、60 秒，之后每 60 秒一次，429 按 `retry_after` 等待；同一渠道串行发送，发送期间不持有数据库事务。
+- 告警一直没发出去、而真实状态已经回到 `notified`：不补发，只写一条 `dropped` 日志（仅当该目标至少失败或被退避推迟过一次）。
+- 暂停条件：通知全局不可用（`ZENO_NOTIFICATIONS_DISABLED`、keyring/authority 门控）、渠道禁用、该类别对该节点没有启用的规则、节点 disabled。暂停时不发送也不推进；恢复后只对账当前差异。
+- 首次见到某个（渠道、节点、类别）时静默写入基线，不发送；渠道 `delivery_version`/`destination_fingerprint` 变化时静默重新基线。
+- 发送成功后、写库前进程崩溃，重启后会再发一次（已接受的重复）。
+
 - `/api/agent/v1/state` 会依据启用的 CPU/内存/磁盘通知类型规则触发或保持 `warning`。
 - `/api/agent/v1/probe-results` 只写入探针历史，不触发异常通知。
-- 状态未变化时不重复发送。
-- `renewal_due` 续费提醒由 Controller 独立低频定时任务扫描，不挂在 heartbeat/host/state 高频请求上。扫描会在同一 SQLite 事务中完成按日 claim 和 outbox delivery 创建；Controller 崩溃后由 outbox 继续发送，且并发扫描不会重复创建同一天/同到期日的提醒。
+
+消息文本：离线 `🔴[离线] {label}`；资源告警 `⚠️[警告] {label}{CPU、内存…}持续占用过高`；续费 `⚠️[到期] {name} 将于 N 天后（YYYY-M-D）到期`（天数按发送当天现算）；离线恢复 `🟢[恢复] {label} 离线 {from}–{to}，共 {时长}`；资源恢复 `🟢[恢复] {label}{规则名}恢复正常，异常 {from}–{to}，共 {时长}`。`{label}` 带 IPv4 掩码；`{from}` 为离线前最后一次心跳时间或首次观察到 warning 的时间，`{to}` 为首次观察到恢复的时间；时间用 Controller 本地时区，两点都在发送当天时为 `HH:MM:SS`，否则为 `M-D HH:MM`；事件起点未知时退回旧文本 `🟢[恢复] {label}`。
+
+每次 sent/failed/dropped/baseline/rebaseline 都写入 `notification_log`（随通知历史保留期清理），sent/failed/dropped 同时打一行容器日志；日志和表中只保存脱敏错误，不含 Bot Token。旧的 `notification_deliveries` 投递记录和单条重试接口已移除。
 
 发送前要求：对应 `alert_rules.enabled = 1`，且至少一个 `notification_channels.enabled = 1` 并已配置 Telegram chat id 和 Bot Token。显式 `POST /notification-channels/{channel_id}/test` 是管理员手动测试，但仍要求渠道处于启用状态并已配置凭据。
 

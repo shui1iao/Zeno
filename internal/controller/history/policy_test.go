@@ -18,8 +18,8 @@ func TestCutoffsAt(t *testing.T) {
 	if want := now.Add(-RollupRetention).Unix(); cutoffs.LegacyRaw != want {
 		t.Fatalf("legacy raw cutoff = %d, want %d", cutoffs.LegacyRaw, want)
 	}
-	if want := now.Add(-StalePendingNotificationDeliveryAfter).Unix(); cutoffs.StalePendingNotification != want {
-		t.Fatalf("stale pending cutoff = %d, want %d", cutoffs.StalePendingNotification, want)
+	if want := now.Add(-RollupRetention).Unix(); cutoffs.NotificationHistory != want {
+		t.Fatalf("notification history cutoff = %d, want %d", cutoffs.NotificationHistory, want)
 	}
 	if cutoffs.Now != now.Unix() {
 		t.Fatalf("now = %d, want %d", cutoffs.Now, now.Unix())

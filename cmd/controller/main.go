@@ -108,9 +108,8 @@ func buildController(config handlerConfig) (*controllerRuntime, error) {
 		options.Store = store
 		options.DisableNotifications = config.DisableNotifications
 		options.StaleOfflineScanInterval = 5 * time.Second
-		options.RenewalNotificationInterval = time.Hour
 		options.HistoryRetentionInterval = time.Hour
-		options.NotificationDispatchInterval = 5 * time.Second
+		options.NotificationReconcileInterval = 2 * time.Second
 		options.ExchangeRateRefreshInterval = 24 * time.Hour
 		cleanupHandlers = append(cleanupHandlers, func(context.Context) error { return store.Close() })
 		if config.SeedPreview {

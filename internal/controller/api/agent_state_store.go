@@ -83,9 +83,6 @@ func (s *sqliteAgentDomain) recordAgentStateReportOnce(ctx context.Context, node
 	if err != nil {
 		return false, notificationStatusTransition{}, err
 	}
-	if err := queueStatusTransitionNotificationTx(ctx, tx, transition, time.Unix(state.TS, 0).UTC()); err != nil {
-		return false, notificationStatusTransition{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return false, notificationStatusTransition{}, err
 	}

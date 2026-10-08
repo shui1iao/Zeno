@@ -30,9 +30,6 @@ func (s *sqliteAgentDomain) recordAgentStateAlertRuleTransitionOnce(ctx context.
 	if err != nil {
 		return notificationStatusTransition{}, err
 	}
-	if err := queueStatusTransitionNotificationTx(ctx, tx, transition, ts); err != nil {
-		return notificationStatusTransition{}, err
-	}
 	if err := tx.Commit(); err != nil {
 		return notificationStatusTransition{}, err
 	}
@@ -67,23 +64,6 @@ func recordAgentStateAlertRuleTransitionTx(ctx context.Context, tx *sql.Tx, node
 		transition.Detail = resourceAlertDetail(recoveredNames, true)
 	}
 	return transition, nil
-}
-
-func queueStatusTransitionNotificationTx(ctx context.Context, tx *sql.Tx, transition notificationStatusTransition, ts time.Time) error {
-	event, ok := notificationEventForStatusTransition(transition, ts)
-	if !ok {
-		return nil
-	}
-	label, channels, err := enabledNotificationChannelsForEventTx(ctx, tx, event.EventType, event.NodeID)
-	if err != nil || len(channels) == 0 {
-		return err
-	}
-	event.Label = label
-	claimed, err := claimStatusNotificationTx(ctx, tx, event)
-	if err != nil || !claimed {
-		return err
-	}
-	return insertNotificationDeliveriesTx(ctx, tx, event, channels, time.Now().UTC().Unix())
 }
 
 func alertRulesForMetrics(ctx context.Context, tx *sql.Tx, nodeID string, metrics map[string]bool) ([]AdminAlertRule, error) {
@@ -265,9 +245,6 @@ func updateNodeStatusForAlertRules(ctx context.Context, tx *sql.Tx, nodeID strin
 		         EXISTS (
 		           SELECT 1 FROM alert_rule_states ars
 		           WHERE ars.node_id = n.id AND ars.rule_id = 'node_offline' AND ars.active = 1
-		         ) OR EXISTS (
-		           SELECT 1 FROM notification_event_marks nem
-		           WHERE nem.event_type = 'node_offline' AND nem.node_id = n.id AND nem.mark = 'status-active:offline'
 		         )
 		       THEN 1 ELSE 0 END
 		FROM nodes n

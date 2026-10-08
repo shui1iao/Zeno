@@ -340,6 +340,42 @@ func (s *SQLiteStore) ensureSchema(ctx context.Context) error {
 			delivered_at INTEGER
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_notification_deliveries_pending ON notification_deliveries(state, next_attempt_at, id);`,
+		// notification_states holds, per channel, node and kind, only what the
+		// user was last told. The actual state is always read from its
+		// authoritative tables. Channel rows are removed explicitly when a
+		// channel is deleted; node rows cascade with the node.
+		`CREATE TABLE IF NOT EXISTS notification_states (
+			channel_id TEXT NOT NULL,
+			node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+			kind TEXT NOT NULL,
+			notified TEXT NOT NULL DEFAULT '',
+			notified_detail TEXT NOT NULL DEFAULT '',
+			incident_from INTEGER NOT NULL DEFAULT 0,
+			pending_target TEXT NOT NULL DEFAULT '',
+			pending_since INTEGER NOT NULL DEFAULT 0,
+			pending_attempts INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			channel_version INTEGER NOT NULL DEFAULT 1,
+			destination_fingerprint TEXT NOT NULL DEFAULT '',
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (channel_id, node_id, kind)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_notification_states_node ON notification_states(node_id);`,
+		`CREATE TABLE IF NOT EXISTS notification_log (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			ts INTEGER NOT NULL,
+			channel_id TEXT NOT NULL DEFAULT '',
+			node_id TEXT NOT NULL DEFAULT '',
+			node_name TEXT NOT NULL DEFAULT '',
+			kind TEXT NOT NULL DEFAULT '',
+			from_state TEXT NOT NULL DEFAULT '',
+			to_state TEXT NOT NULL DEFAULT '',
+			outcome TEXT NOT NULL,
+			attempt INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			message TEXT NOT NULL DEFAULT ''
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_notification_log_ts ON notification_log(ts, id);`,
 		`CREATE TABLE IF NOT EXISTS settings (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL,
@@ -455,24 +491,10 @@ func (s *SQLiteStore) ensureSchema(ctx context.Context) error {
 		"superseded_by_event_id":      "TEXT NOT NULL DEFAULT ''",
 	}
 	stage.columns("notification-delivery-columns", "notification_deliveries", notificationDeliveryColumns)
-	stage.run("notification-delivery-request-phase", func() error {
-		return s.runValidatedSchemaMigration(ctx, "20260814_notification_delivery_request_phase_v1", nil, func(migrationCtx context.Context) error {
-			// Rows leased by an older binary have no persisted pre-send boundary.
-			// Preserve the old conservative behavior for those ambiguous rows once;
-			// leases created after this migration can safely use zero for "claimed
-			// but not started".
-			_, err := s.db.ExecContext(migrationCtx, `
-				UPDATE notification_deliveries
-				SET request_started_at = CASE WHEN updated_at > 0 THEN updated_at ELSE 1 END
-				WHERE state = 'leased' AND request_started_at = 0
-			`)
-			return err
-		})
-	})
 	stage.run("notification-routing-bindings", func() error { return s.migrateNotificationRoutingBindings(ctx) })
-	// Existing databases predate the lease columns. Build the claim index only
-	// after both columns have been added; otherwise CREATE INDEX aborts startup
-	// before the migration can run.
+	// The legacy delivery columns and indexes are kept so a rollback to the
+	// outbox release finds the schema it expects. This release never writes
+	// notification_deliveries.
 	stage.run("notification-delivery-indexes", func() error {
 		for _, statement := range []string{
 			`CREATE INDEX IF NOT EXISTS idx_notification_deliveries_claim ON notification_deliveries(state, next_attempt_at, lease_until, id)`,
@@ -517,6 +539,8 @@ func (s *SQLiteStore) ensureSchema(ctx context.Context) error {
 	stage.columns("alert-rule-state-columns", "alert_rule_states", alertRuleStateColumns)
 	stage.run("default-alert-rules", func() error { return s.ensureDefaultAlertRules(ctx) })
 	stage.run("retired-notification-config-prune", func() error { return s.pruneRetiredNotificationConfig(ctx) })
+	// Runs after channel bindings and default alert rules exist.
+	stage.run("notification-reconcile-seed", func() error { return s.seedNotificationStatesFromLegacy(ctx) })
 	return stage.result()
 }
 

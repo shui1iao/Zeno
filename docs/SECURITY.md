@@ -57,7 +57,7 @@ Zeno 不提供 command exec、shell、文件管理、脚本执行或通用任务
 - 渠道凭据使用外部 32-byte credential keyring 加密；SQLite 保存 ciphertext、key id/fingerprint，不保存 authority key。
 - authority keyring 验证数据库绑定；轮换时先部署新旧双 key，将 `active_key_id` 切到新 key、完成改写后再删除旧 key。不要只恢复数据库而遗漏与之匹配的两个 keyring。
 - 官方安装的 keyring 文件位于 `secrets/`，必须为普通文件、root 持有且不得向 group/other 开放写权限。Compose 以只读 secret mount 提供给非 root Controller。
-- 测试渠道也可能产生 outbox。删除/禁用测试规则和渠道，并确认无待发送记录后，才可换入真实凭据；不要用生产 Bot Token 做验收。
+- 测试渠道也会参与通知对账，可能有待送达的消息（`notification_states.pending_target`）并在换入真实凭据后发出。删除/禁用测试规则和渠道后，才可换入真实凭据；不要用生产 Bot Token 做验收。
 
 ## 公网部署 checklist
 

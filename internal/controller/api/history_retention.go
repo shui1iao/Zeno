@@ -17,14 +17,13 @@ import (
 // scheduler, the rollback grace decision, and the background loop.
 
 const (
-	rawHistoryRetention                   = history.RawRetention
-	historyRollupRetention                = history.RollupRetention
-	stalePendingNotificationDeliveryAfter = history.StalePendingNotificationDeliveryAfter
-	historyRetentionBatchSize             = history.BatchSize
-	historyRetentionBatchPause            = history.BatchPause
-	historyRetentionMaxBatchCycles        = history.MaxBatchCycles
-	historyRetentionScheduleOffset        = history.ScheduleOffset
-	historyRetentionVacuumPages           = history.VacuumPagesPerPass
+	rawHistoryRetention            = history.RawRetention
+	historyRollupRetention         = history.RollupRetention
+	historyRetentionBatchSize      = history.BatchSize
+	historyRetentionBatchPause     = history.BatchPause
+	historyRetentionMaxBatchCycles = history.MaxBatchCycles
+	historyRetentionScheduleOffset = history.ScheduleOffset
+	historyRetentionVacuumPages    = history.VacuumPagesPerPass
 )
 
 const (
@@ -224,11 +223,11 @@ func (s *sqliteHistoryStore) pruneHistoryStatements(ctx context.Context, cutoff 
 	return nil
 }
 
+// pruneNotificationHistory trims the notification log. The legacy
+// notification_deliveries table is kept read-only for rollback and is no
+// longer pruned or expired by this release.
 func (s *sqliteHistoryStore) pruneNotificationHistory(ctx context.Context, cutoffs history.Cutoffs) error {
-	if err := s.pruneRowsInBatches(ctx, history.PruneTerminalNotificationDeliveriesSQL, cutoffs.NotificationHistory); err != nil {
-		return err
-	}
-	return s.expirePendingNotificationDeliveriesInBatches(ctx, cutoffs.StalePendingNotification, cutoffs.Now)
+	return s.pruneRowsInBatches(ctx, history.PruneNotificationLogSQL, cutoffs.NotificationHistory)
 }
 
 func (s *sqliteHistoryStore) historyRollupReady(ctx context.Context, now time.Time) (bool, error) {
@@ -265,17 +264,6 @@ func (s *sqliteHistoryStore) runHistoryBatches(ctx context.Context, exec func(co
 func (s *sqliteHistoryStore) pruneRowsInBatches(ctx context.Context, query string, cutoff int64) error {
 	return s.runHistoryBatches(ctx, func(writeCtx context.Context) (int64, error) {
 		result, err := s.db.ExecContext(writeCtx, query, cutoff, historyRetentionBatchSize)
-		if err != nil {
-			return 0, err
-		}
-		return result.RowsAffected()
-	})
-}
-
-func (s *sqliteHistoryStore) expirePendingNotificationDeliveriesInBatches(ctx context.Context, stalePendingCutoff, now int64) error {
-	return s.runHistoryBatches(ctx, func(writeCtx context.Context) (int64, error) {
-		result, err := s.db.ExecContext(writeCtx, history.ExpirePendingNotificationDeliveriesSQL,
-			now, stalePendingCutoff, historyRetentionBatchSize)
 		if err != nil {
 			return 0, err
 		}

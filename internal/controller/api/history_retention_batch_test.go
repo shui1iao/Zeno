@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/shui1iao/zeno/internal/controller/history"
 )
 
 type scheduledHistoryRetentionStore struct {
@@ -115,6 +117,10 @@ func TestHistoryRetentionUsesTimeIndexesWhenNothingIsExpired(t *testing.T) {
 	if !strings.Contains(statePlan, "idx_state_samples_node_ts") || strings.Contains(statePlan, "SCAN samples") {
 		t.Fatalf("state retention plan must seek each node/time range, got:\n%s", statePlan)
 	}
+	logPlan := explainHistoryQueryPlan(t, store, history.PruneNotificationLogSQL, cutoff)
+	if !strings.Contains(logPlan, "idx_notification_log_ts") {
+		t.Fatalf("notification log retention plan must seek the time index, got:\n%s", logPlan)
+	}
 }
 
 func explainHistoryQueryPlan(t *testing.T, store *SQLiteStore, query string, cutoff int64) string {
@@ -168,17 +174,25 @@ func TestPruneRawHistoryDeletesInBatchesAndKeepsRecentRows(t *testing.T) {
 	}
 	for i := 0; i < historyRetentionBatchSize+3; i++ {
 		if _, err := store.db.ExecContext(ctx, `
-			INSERT INTO notification_deliveries (event_type, channel_id, state, next_attempt_at, created_at, updated_at)
-			VALUES ('node_offline', ?, 'delivered', 0, ?, ?)
-		`, fmt.Sprintf("channel-%d", i), oldTS, oldTS); err != nil {
-			t.Fatalf("insert old notification %d: %v", i, err)
+			INSERT INTO notification_log (ts, channel_id, node_id, kind, outcome, message)
+			VALUES (?, ?, 'example-node-a', 'node_offline', 'sent', 'old')
+		`, oldTS, fmt.Sprintf("channel-%d", i)); err != nil {
+			t.Fatalf("insert old notification log %d: %v", i, err)
 		}
 	}
 	if _, err := store.db.ExecContext(ctx, `
+		INSERT INTO notification_log (ts, channel_id, node_id, kind, outcome, message)
+		VALUES (?, 'recent-channel', 'example-node-a', 'node_offline', 'sent', 'recent')
+	`, recentTS); err != nil {
+		t.Fatalf("insert recent notification log: %v", err)
+	}
+	// The legacy outbox table is kept read-only for rollback: this release
+	// neither prunes nor expires it.
+	if _, err := store.db.ExecContext(ctx, `
 		INSERT INTO notification_deliveries (event_type, channel_id, state, next_attempt_at, created_at, updated_at)
-		VALUES ('node_offline', 'recent-channel', 'delivered', 0, ?, ?)
-	`, recentTS, recentTS); err != nil {
-		t.Fatalf("insert recent notification: %v", err)
+		VALUES ('node_offline', 'legacy-channel', 'delivered', 0, ?, ?), ('node_offline', 'legacy-channel', 'pending', 0, ?, ?)
+	`, oldTS, oldTS, oldTS, oldTS); err != nil {
+		t.Fatalf("insert legacy notification deliveries: %v", err)
 	}
 
 	if err := store.MaintainHistory(ctx, now); err != nil {
@@ -190,7 +204,7 @@ func TestPruneRawHistoryDeletesInBatchesAndKeepsRecentRows(t *testing.T) {
 	}{
 		{name: "old state", query: `SELECT COUNT(*) FROM state_samples WHERE ts < ?`},
 		{name: "old probe", query: `SELECT COUNT(*) FROM probe_rounds WHERE ts < ?`},
-		{name: "old delivered notifications", query: `SELECT COUNT(*) FROM notification_deliveries WHERE state = 'delivered' AND updated_at < ?`},
+		{name: "old notification log", query: `SELECT COUNT(*) FROM notification_log WHERE ts < ?`},
 	} {
 		var count int
 		if err := store.db.QueryRowContext(ctx, check.query, now.Add(-rawHistoryRetention).Unix()).Scan(&count); err != nil {
@@ -221,7 +235,7 @@ func TestPruneRawHistoryDeletesInBatchesAndKeepsRecentRows(t *testing.T) {
 	}{
 		{name: "recent state", query: `SELECT COUNT(*) FROM state_samples WHERE ts = ?`},
 		{name: "recent probe", query: `SELECT COUNT(*) FROM probe_rounds WHERE ts = ?`},
-		{name: "recent notification", query: `SELECT COUNT(*) FROM notification_deliveries WHERE channel_id = 'recent-channel' AND updated_at = ?`},
+		{name: "recent notification log", query: `SELECT COUNT(*) FROM notification_log WHERE channel_id = 'recent-channel' AND ts = ?`},
 	} {
 		var count int
 		if err := store.db.QueryRowContext(ctx, check.query, recentTS).Scan(&count); err != nil {
@@ -230,6 +244,13 @@ func TestPruneRawHistoryDeletesInBatchesAndKeepsRecentRows(t *testing.T) {
 		if count != 1 {
 			t.Fatalf("%s count = %d, want 1", check.name, count)
 		}
+	}
+	var legacyRows, legacyPending int
+	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*), SUM(state = 'pending') FROM notification_deliveries WHERE channel_id = 'legacy-channel'`).Scan(&legacyRows, &legacyPending); err != nil {
+		t.Fatalf("count legacy deliveries: %v", err)
+	}
+	if legacyRows != 2 || legacyPending != 1 {
+		t.Fatalf("legacy deliveries rows=%d pending=%d, want both rows untouched", legacyRows, legacyPending)
 	}
 }
 

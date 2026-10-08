@@ -55,7 +55,6 @@ type sqliteMonitoringDomain struct {
 
 type sqliteNotificationDomain struct {
 	*sqliteNotificationAuthority
-	*sqliteRenewalNotifications
 	db                      *sql.DB
 	notificationCredentials notificationCredentialState
 	writes                  *sqliteWriteState
@@ -75,13 +74,12 @@ const (
 	// Keep SQLite's one-writer authority behind a fair, bounded scheduler shared
 	// by Agent writes and recurring maintenance. Short busy waits still cover
 	// external SQLite writers without allowing an unbounded process-global queue.
-	sqliteAgentWriteTimeout    = 8 * time.Second
-	sqliteBusyRetryFor         = 6 * time.Second
-	sqliteBusyRetryInitial     = 25 * time.Millisecond
-	sqliteBusyRetryMax         = 250 * time.Millisecond
-	historyRetentionWriteKey   = "_history_retention"
-	notificationOutboxWriteKey = "_notification_outbox"
-	adminDeletionWriteKey      = "_admin_deletion"
+	sqliteAgentWriteTimeout  = 8 * time.Second
+	sqliteBusyRetryFor       = 6 * time.Second
+	sqliteBusyRetryInitial   = 25 * time.Millisecond
+	sqliteBusyRetryMax       = 250 * time.Millisecond
+	historyRetentionWriteKey = "_history_retention"
+	adminDeletionWriteKey    = "_admin_deletion"
 )
 
 func (s *sqliteWriteState) withAgentWrite(ctx context.Context, nodeID string, operation func(context.Context) error) error {
@@ -109,10 +107,6 @@ func withAgentWriteResult[T any](state *sqliteWriteState, ctx context.Context, n
 		return operationErr
 	})
 	return result, err
-}
-
-func retrySQLiteBusy(ctx context.Context, operation func() error) error {
-	return retrySQLiteBusyObserved(ctx, operation, nil)
 }
 
 func retrySQLiteBusyObserved(ctx context.Context, operation func() error, onRetry func()) error {
@@ -240,7 +234,6 @@ func newSQLiteStore(db *sql.DB, telemetryStorage *telemetryStorageGuard) *SQLite
 		},
 		sqliteNotificationDomain: &sqliteNotificationDomain{
 			sqliteNotificationAuthority: &sqliteNotificationAuthority{db: db},
-			sqliteRenewalNotifications:  &sqliteRenewalNotifications{db: db},
 			db:                          db,
 			writes:                      writes,
 		},

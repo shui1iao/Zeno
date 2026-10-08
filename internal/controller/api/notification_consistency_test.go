@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
-	"errors"
+	"encoding/base64"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -11,564 +13,55 @@ import (
 	"time"
 )
 
-func newNotificationConsistencyStore(t *testing.T) (*SQLiteStore, AdminNotificationChannel) {
-	t.Helper()
-	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "zeno.db"))
-	if err != nil {
-		t.Fatalf("open sqlite store: %v", err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
-	enableTestNotificationCredentialEncryption(t, store)
-	ctx := context.Background()
-	if err := store.SeedPreviewData(ctx, PreviewSeedOptions{NodeID: "node-a", DisplayName: "Node A", AgentToken: "agent-token"}); err != nil {
-		t.Fatalf("seed node: %v", err)
-	}
+// A channel whose stored credential cannot be decrypted fails its own
+// deliveries (retried, never logged in clear) without blocking a healthy
+// channel.
+func TestReconcileDamagedCredentialFailsOnlyItsChannelWithoutLeaking(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&logs)
+	defer log.SetOutput(previous)
+
+	hs := newReconcileHarness(t, shanghaiTime(2026, 10, 6, 9, 0, 0))
 	enabled := true
-	channel, err := store.CreateAdminNotificationChannel(ctx, AdminNotificationChannelCreateRequest{
-		ID: "ops", Name: "Ops", Destination: "chat-old", Credential: "credential-old", Enabled: &enabled,
-	})
-	if err != nil {
+	if _, err := hs.store.CreateAdminNotificationChannel(hs.ctx, AdminNotificationChannelCreateRequest{
+		ID: "broken", Name: "Broken", Destination: "1000", Credential: "broken-bot-secret-value", Enabled: &enabled,
+	}); err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
-	return store, channel
-}
-
-func dispatchChannelFromAdmin(channel AdminNotificationChannel) notificationDispatchChannel {
-	return notificationDispatchChannel{ID: channel.ID, Name: channel.Name, Type: "telegram", Destination: channel.Destination}
-}
-
-func TestNotificationRecoverySuppressesBothMessagesWhenAlertWasNeverAttempted(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	offlineAt := "2026-07-13T12:00:01.123456789Z"
-	recoveryAt := "2026-07-13T12:00:02.987654321Z"
-	offline := notificationEvent{EventType: "node_offline", Label: "离线", NodeID: "node-a", NodeName: "Node A", PreviousStatus: "online", Status: "offline", TS: offlineAt}
-	if queued, err := store.QueueNotificationEvent(ctx, offline, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue offline: queued=%v err=%v", queued, err)
+	hs.addNode("n1", "Node One", "")
+	hs.round()
+	corrupted := notificationCredentialCiphertextPrefix + base64.RawURLEncoding.EncodeToString([]byte("damaged-ciphertext-payload"))
+	if _, err := hs.store.db.ExecContext(hs.ctx, `UPDATE notification_channels SET credential = ? WHERE id = 'broken'`, corrupted); err != nil {
+		t.Fatalf("corrupt credential: %v", err)
 	}
-	recovery := notificationEvent{EventType: "node_offline", Label: "离线", NodeID: "node-a", NodeName: "Node A", PreviousStatus: "offline", Status: "online", TS: recoveryAt}
-	if queued, err := store.QueueNotificationEvent(ctx, recovery, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue recovery: queued=%v err=%v", queued, err)
+	hs.setLiveness("n1", "offline", hs.now().Unix())
+	hs.after(2 * time.Second)
+	forms := hs.tg.ackedForms()
+	if len(forms) != 1 || !strings.Contains(forms[0], "chat_id=7579942307") {
+		t.Fatalf("acked forms = %q, want only the healthy channel", forms)
 	}
-
-	var offlineState, supersededBy, storedOfflineAt string
-	if err := store.db.QueryRowContext(ctx, `
-		SELECT state, superseded_by_event_id, event_ts
-		FROM notification_deliveries WHERE status = 'offline'
-	`).Scan(&offlineState, &supersededBy, &storedOfflineAt); err != nil {
-		t.Fatalf("read offline delivery: %v", err)
-	}
-	if offlineState != "canceled" || supersededBy == "" || storedOfflineAt != offlineAt {
-		t.Fatalf("offline state=%q superseded_by=%q ts=%q", offlineState, supersededBy, storedOfflineAt)
-	}
-	var recoveryCount int
-	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notification_deliveries WHERE status = 'online'`).Scan(&recoveryCount); err != nil {
-		t.Fatalf("count recovery rows: %v", err)
-	}
-	if recoveryCount != 0 {
-		t.Fatalf("recovery rows=%d, want none when alert was never attempted", recoveryCount)
-	}
-	claimed, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 32)
+	var broken notificationStateRow
+	tx, err := hs.store.db.BeginTx(hs.ctx, nil)
 	if err != nil {
-		t.Fatalf("claim after suppressed pair: %v", err)
+		t.Fatalf("begin: %v", err)
 	}
-	if len(claimed) != 0 {
-		t.Fatalf("suppressed pair remained deliverable: %+v", claimed)
+	states, err := notificationStateRows(hs.ctx, tx)
+	_ = tx.Rollback()
+	if err != nil {
+		t.Fatalf("states: %v", err)
 	}
-}
-
-func TestNotificationRecoveryCancelsFailedPredecessorInsteadOfReplayingBacklog(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	offline := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "online", Status: "offline", TS: "2026-07-13T12:00:01Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, offline, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue offline: queued=%v err=%v", queued, err)
+	broken = states[notificationStateKey{ChannelID: "broken", NodeID: "n1", Kind: notificationKindLiveness}]
+	if broken.Notified != livenessStateOnline || broken.PendingTarget != livenessStateOffline || broken.PendingAttempts != 1 || broken.LastError != "notification credential unavailable" {
+		t.Fatalf("broken channel row = %+v, want a retryable credential failure", broken)
 	}
-	attemptAt := time.Now().UTC()
-	claimed, err := store.PendingNotificationDeliveries(ctx, attemptAt, 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim offline: %+v err=%v", claimed, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, claimed[0], errors.New("temporary failure"), attemptAt); err != nil {
-		t.Fatalf("record failed attempt: %v", err)
-	}
-	recovery := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "offline", Status: "online", TS: "2026-07-13T12:00:02Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, recovery, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue recovery: queued=%v err=%v", queued, err)
-	}
-	var predecessorState, predecessorError string
-	if err := store.db.QueryRowContext(ctx, `SELECT state, last_error FROM notification_deliveries WHERE status = 'offline'`).Scan(&predecessorState, &predecessorError); err != nil {
-		t.Fatalf("read predecessor: %v", err)
-	}
-	if predecessorState != "canceled" || predecessorError != "superseded by newer status" {
-		t.Fatalf("predecessor state=%q error=%q", predecessorState, predecessorError)
-	}
-	var recoveryCount int
-	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notification_deliveries WHERE status = 'online'`).Scan(&recoveryCount); err != nil {
-		t.Fatalf("count recovery rows: %v", err)
-	}
-	if recoveryCount != 0 {
-		t.Fatalf("recovery rows=%d, want none after undelivered alert", recoveryCount)
-	}
-	blocked, err := store.PendingNotificationDeliveries(ctx, attemptAt.Add(time.Second), 1)
-	if err != nil || len(blocked) != 0 {
-		t.Fatalf("suppressed backlog became deliverable: %+v err=%v", blocked, err)
-	}
-}
-
-func TestNotificationRecoverySuppressesWhenAlertDeliveryOutcomeIsUnknown(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	offline := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "online", Status: "offline", TS: "2026-07-13T12:00:01Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, offline, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue offline: queued=%v err=%v", queued, err)
-	}
-	attemptAt := time.Now().UTC()
-	claimed, err := store.PendingNotificationDeliveries(ctx, attemptAt, 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim offline: %+v err=%v", claimed, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, claimed[0], fmt.Errorf("%w: response lost", errNotificationDeliveryOutcomeUnknown), attemptAt); err != nil {
-		t.Fatalf("record ambiguous offline attempt: %v", err)
-	}
-	recovery := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "offline", Status: "online", TS: "2026-07-13T12:00:02Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, recovery, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue recovery transition: queued=%v err=%v", queued, err)
-	}
-	var recoveryCount int
-	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notification_deliveries WHERE status = 'online'`).Scan(&recoveryCount); err != nil {
-		t.Fatalf("count recovery rows: %v", err)
-	}
-	if recoveryCount != 0 {
-		t.Fatalf("recovery rows=%d, want none after ambiguous offline delivery", recoveryCount)
-	}
-	if pending, err := store.PendingNotificationDeliveries(ctx, attemptAt.Add(time.Second), 1); err != nil || len(pending) != 0 {
-		t.Fatalf("ambiguous pair became deliverable: %+v err=%v", pending, err)
-	}
-}
-
-func TestNotificationAmbiguousOldAlertDoesNotSuppressNextIncident(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	queue := func(previousStatus, status, ts string) {
-		t.Helper()
-		event := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: previousStatus, Status: status, TS: ts}
-		if queued, err := store.QueueNotificationEvent(ctx, event, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-			t.Fatalf("queue %s -> %s: queued=%v err=%v", previousStatus, status, queued, err)
+	for _, secret := range []string{"telegram-bot-secret-value", "broken-bot-secret-value", corrupted} {
+		if strings.Contains(logs.String(), secret) {
+			t.Fatalf("log leaked credential material %q:\n%s", secret, logs.String())
 		}
 	}
-
-	queue("online", "offline", "2026-07-13T12:00:01Z")
-	first, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(first) != 1 {
-		t.Fatalf("claim ambiguous alert: %+v err=%v", first, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, first[0], fmt.Errorf("%w: response lost", errNotificationDeliveryOutcomeUnknown), time.Now().UTC()); err != nil {
-		t.Fatalf("record ambiguous alert: %v", err)
-	}
-	queue("offline", "online", "2026-07-13T12:00:02Z")
-
-	queue("online", "offline", "2026-07-13T13:00:01Z")
-	second, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(second) != 1 || second[0].Event.Status != "offline" {
-		t.Fatalf("next incident alert: %+v err=%v", second, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, second[0], nil, time.Now().UTC()); err != nil {
-		t.Fatalf("deliver next incident alert: %v", err)
-	}
-	queue("offline", "online", "2026-07-13T13:01:02Z")
-	var recoveryCount int
-	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notification_deliveries WHERE status = 'online' AND state = 'pending'`).Scan(&recoveryCount); err != nil {
-		t.Fatalf("count pending recovery rows: %v", err)
-	}
-	if recoveryCount != 1 {
-		t.Fatalf("pending recovery rows=%d, want one after confirmed next alert", recoveryCount)
-	}
-}
-
-func TestNotificationStatusPairingDoesNotCrossIncidentBoundary(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	queue := func(previousStatus, status, ts string) {
-		t.Helper()
-		event := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: previousStatus, Status: status, TS: ts}
-		if queued, err := store.QueueNotificationEvent(ctx, event, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-			t.Fatalf("queue %s -> %s: queued=%v err=%v", previousStatus, status, queued, err)
-		}
-	}
-
-	queue("online", "offline", "2026-07-13T12:00:01Z")
-	first, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(first) != 1 {
-		t.Fatalf("claim first incident alert: %+v err=%v", first, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, first[0], nil, time.Now().UTC()); err != nil {
-		t.Fatalf("deliver first incident alert: %v", err)
-	}
-	queue("offline", "online", "2026-07-13T12:01:02Z")
-	if _, err := store.db.ExecContext(ctx, `
-		UPDATE notification_deliveries SET state = 'canceled', last_error = 'test recovery not delivered' WHERE status = 'online';
-		UPDATE notification_deliveries SET created_at = created_at - 3600, updated_at = updated_at - 3600;
-		UPDATE notification_event_marks SET created_at = created_at - 3600;
-	`); err != nil {
-		t.Fatalf("age first incident: %v", err)
-	}
-
-	queue("online", "offline", "2026-07-13T13:00:01Z")
-	second, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(second) != 1 || second[0].Event.Status != "offline" {
-		t.Fatalf("claim second incident alert: %+v err=%v", second, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, second[0], fmt.Errorf("%w: response lost", errNotificationDeliveryOutcomeUnknown), time.Now().UTC()); err != nil {
-		t.Fatalf("record ambiguous second alert: %v", err)
-	}
-	queue("offline", "online", "2026-07-13T13:01:02Z")
-	var secondRecoveryCount int
-	if err := store.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM notification_deliveries
-		WHERE status = 'online' AND created_at >= strftime('%s', 'now') - 60
-	`).Scan(&secondRecoveryCount); err != nil {
-		t.Fatalf("count second incident recovery rows: %v", err)
-	}
-	if secondRecoveryCount != 0 {
-		t.Fatalf("second incident recovery rows=%d, want none without a confirmed second alert", secondRecoveryCount)
-	}
-}
-
-func TestNotificationRecoveryQueuedBehindLeaseIsSuppressedWhenAlertFails(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	offline := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "online", Status: "offline", TS: "2026-07-13T12:00:01Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, offline, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue offline: queued=%v err=%v", queued, err)
-	}
-	attemptAt := time.Now().UTC()
-	claimed, err := store.PendingNotificationDeliveries(ctx, attemptAt, 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim offline: %+v err=%v", claimed, err)
-	}
-	recovery := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "offline", Status: "online", TS: "2026-07-13T12:00:02Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, recovery, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue recovery: queued=%v err=%v", queued, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, claimed[0], errors.New("temporary failure"), attemptAt); err != nil {
-		t.Fatalf("record failed leased predecessor: %v", err)
-	}
-	if _, err := store.PendingNotificationDeliveries(ctx, attemptAt.Add(time.Second), 1); err != nil {
-		t.Fatalf("coalesce failed predecessor: %v", err)
-	}
-	var predecessorState string
-	if err := store.db.QueryRowContext(ctx, `SELECT state FROM notification_deliveries WHERE status = 'offline'`).Scan(&predecessorState); err != nil {
-		t.Fatalf("read predecessor: %v", err)
-	}
-	if predecessorState != "canceled" {
-		t.Fatalf("predecessor state=%q, want canceled", predecessorState)
-	}
-	var recoveryState, recoveryError string
-	if err := store.db.QueryRowContext(ctx, `SELECT state, last_error FROM notification_deliveries WHERE status = 'online'`).Scan(&recoveryState, &recoveryError); err != nil {
-		t.Fatalf("read recovery: %v", err)
-	}
-	if recoveryState != "canceled" || recoveryError != "status suppressed because user-visible state did not change" {
-		t.Fatalf("recovery state=%q error=%q", recoveryState, recoveryError)
-	}
-}
-
-func TestNotificationRecoveryQueuedBehindLeaseIsDeliveredWhenAlertSucceeds(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	offline := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "online", Status: "offline", TS: "2026-07-13T12:00:01Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, offline, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue offline: queued=%v err=%v", queued, err)
-	}
-	attemptAt := time.Now().UTC()
-	claimed, err := store.PendingNotificationDeliveries(ctx, attemptAt, 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim offline: %+v err=%v", claimed, err)
-	}
-	recovery := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "offline", Status: "online", TS: "2026-07-13T12:00:02Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, recovery, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue recovery: queued=%v err=%v", queued, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, claimed[0], nil, attemptAt); err != nil {
-		t.Fatalf("record delivered alert: %v", err)
-	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE notification_deliveries SET next_attempt_at = 0 WHERE status = 'online'`); err != nil {
-		t.Fatalf("make recovery due: %v", err)
-	}
-	claimed, err = store.PendingNotificationDeliveries(ctx, attemptAt.Add(time.Second), 1)
-	if err != nil || len(claimed) != 1 || claimed[0].Event.Status != "online" {
-		t.Fatalf("claim recovery: %+v err=%v", claimed, err)
-	}
-}
-
-func TestNotificationRecoveryUsesConfiguredAlertDuration(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	if _, err := store.db.ExecContext(ctx, `UPDATE alert_rules SET duration_sec = 30 WHERE id = 'node_offline'`); err != nil {
-		t.Fatalf("set offline duration: %v", err)
-	}
-	offline := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "online", Status: "offline", TS: "2026-07-13T12:00:01Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, offline, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue offline: queued=%v err=%v", queued, err)
-	}
-	claimed, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim offline: %+v err=%v", claimed, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, claimed[0], nil, time.Now().UTC()); err != nil {
-		t.Fatalf("deliver offline: %v", err)
-	}
-	recovery := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: "offline", Status: "online", TS: "2026-07-13T12:00:02Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, recovery, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue recovery: queued=%v err=%v", queued, err)
-	}
-	var createdAt, nextAttemptAt int64
-	if err := store.db.QueryRowContext(ctx, `SELECT created_at, next_attempt_at FROM notification_deliveries WHERE status = 'online'`).Scan(&createdAt, &nextAttemptAt); err != nil {
-		t.Fatalf("read recovery schedule: %v", err)
-	}
-	if nextAttemptAt-createdAt != 30 {
-		t.Fatalf("recovery delay=%ds, want configured 30s", nextAttemptAt-createdAt)
-	}
-	if due, err := store.PendingNotificationDeliveries(ctx, time.Unix(nextAttemptAt-1, 0).UTC(), 1); err != nil || len(due) != 0 {
-		t.Fatalf("recovery became due early: %+v err=%v", due, err)
-	}
-	if due, err := store.PendingNotificationDeliveries(ctx, time.Unix(nextAttemptAt, 0).UTC(), 1); err != nil || len(due) != 1 || due[0].Event.Status != "online" {
-		t.Fatalf("recovery not due at configured delay: %+v err=%v", due, err)
-	}
-}
-
-func TestNotificationAlertQueuedBehindRecoveryLeaseIsSuppressedWhenRecoveryFails(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	queue := func(previousStatus, status, ts string) {
-		t.Helper()
-		event := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: previousStatus, Status: status, TS: ts}
-		if queued, err := store.QueueNotificationEvent(ctx, event, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-			t.Fatalf("queue %s -> %s: queued=%v err=%v", previousStatus, status, queued, err)
-		}
-	}
-	queue("online", "offline", "2026-07-13T12:00:01Z")
-	claimed, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim offline: %+v err=%v", claimed, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, claimed[0], nil, time.Now().UTC()); err != nil {
-		t.Fatalf("deliver offline: %v", err)
-	}
-	queue("offline", "online", "2026-07-13T12:00:02Z")
-	if _, err := store.db.ExecContext(ctx, `UPDATE notification_deliveries SET next_attempt_at = 0 WHERE status = 'online'`); err != nil {
-		t.Fatalf("make recovery due: %v", err)
-	}
-	claimed, err = store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(claimed) != 1 || claimed[0].Event.Status != "online" {
-		t.Fatalf("claim recovery: %+v err=%v", claimed, err)
-	}
-	queue("online", "offline", "2026-07-13T12:00:03Z")
-	if err := store.RecordNotificationDeliveryAttempt(ctx, claimed[0], errors.New("network is unreachable"), time.Now().UTC()); err != nil {
-		t.Fatalf("fail leased recovery: %v", err)
-	}
-	if pending, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC().Add(time.Second), 1); err != nil || len(pending) != 0 {
-		t.Fatalf("redundant alert became deliverable: %+v err=%v", pending, err)
-	}
-	var state, lastError string
-	if err := store.db.QueryRowContext(ctx, `SELECT state, last_error FROM notification_deliveries ORDER BY id DESC LIMIT 1`).Scan(&state, &lastError); err != nil {
-		t.Fatalf("read redundant alert: %v", err)
-	}
-	if state != "canceled" || lastError != "status suppressed because user-visible state did not change" {
-		t.Fatalf("redundant alert state=%q error=%q", state, lastError)
-	}
-}
-
-func TestNotificationFlapDuringRecoveryWindowSuppressesRedundantPair(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	queue := func(previousStatus, status, ts string) {
-		t.Helper()
-		event := notificationEvent{EventType: "node_offline", NodeID: "node-a", PreviousStatus: previousStatus, Status: status, TS: ts}
-		if queued, err := store.QueueNotificationEvent(ctx, event, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-			t.Fatalf("queue %s -> %s: queued=%v err=%v", previousStatus, status, queued, err)
-		}
-	}
-
-	queue("online", "offline", "2026-07-13T12:00:01Z")
-	claimed, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim first offline: %+v err=%v", claimed, err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, claimed[0], nil, time.Now().UTC()); err != nil {
-		t.Fatalf("deliver first offline: %v", err)
-	}
-
-	queue("offline", "online", "2026-07-13T12:00:02Z")
-	// Make the incident boundary cross a wall-clock second without sleeping.
-	// The delivered alert must remain the user-visible state while its delayed
-	// recovery is still pending; second-resolution timestamps previously made
-	// this test pass only when every transition happened within one second.
-	if _, err := store.db.ExecContext(ctx, `
-		UPDATE notification_deliveries SET created_at = created_at - 10, updated_at = updated_at - 10;
-		UPDATE notification_event_marks SET created_at = created_at - 10;
-	`); err != nil {
-		t.Fatalf("age pending recovery incident: %v", err)
-	}
-	queue("online", "offline", "2026-07-13T12:00:20Z")
-
-	var total, delivered, canceled, pending int
-	if err := store.db.QueryRowContext(ctx, `
-		SELECT COUNT(*),
-		       SUM(CASE WHEN state = 'delivered' THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN state = 'canceled' THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END)
-		FROM notification_deliveries
-	`).Scan(&total, &delivered, &canceled, &pending); err != nil {
-		t.Fatalf("read flap rows: %v", err)
-	}
-	if total != 2 || delivered != 1 || canceled != 1 || pending != 0 {
-		t.Fatalf("flap rows total=%d delivered=%d canceled=%d pending=%d", total, delivered, canceled, pending)
-	}
-
-	queue("offline", "online", "2026-07-13T12:01:30Z")
-	if _, err := store.db.ExecContext(ctx, `UPDATE notification_deliveries SET next_attempt_at = 0 WHERE state = 'pending'`); err != nil {
-		t.Fatalf("make stable recovery due: %v", err)
-	}
-	claimed, err = store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(claimed) != 1 || !notificationEventIsRecovery(claimed[0].Event) {
-		t.Fatalf("claim stable recovery: %+v err=%v", claimed, err)
-	}
-}
-
-func TestNotificationChannelRouteChangeAndDeleteCancelOldBacklog(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	queue := func(ts string) {
-		t.Helper()
-		event := notificationEvent{EventType: "test_notification", TS: ts}
-		if queued, err := store.QueueNotificationEvent(ctx, event, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-			t.Fatalf("queue event: queued=%v err=%v", queued, err)
-		}
-	}
-	queue("2026-07-13T12:00:01Z")
-	newDestination := "chat-new"
-	if _, err := store.UpdateAdminNotificationChannel(ctx, channel.ID, AdminNotificationChannelUpdateRequest{Destination: &newDestination}); err != nil {
-		t.Fatalf("change destination: %v", err)
-	}
-	var state, fingerprint string
-	var boundVersion, currentVersion int64
-	if err := store.db.QueryRowContext(ctx, `SELECT state, channel_version, destination_fingerprint FROM notification_deliveries LIMIT 1`).Scan(&state, &boundVersion, &fingerprint); err != nil {
-		t.Fatalf("read canceled backlog: %v", err)
-	}
-	if err := store.db.QueryRowContext(ctx, `SELECT delivery_version FROM notification_channels WHERE id = ?`, channel.ID).Scan(&currentVersion); err != nil {
-		t.Fatalf("read channel version: %v", err)
-	}
-	if state != "canceled" || boundVersion >= currentVersion || strings.Contains(fingerprint, "chat-old") {
-		t.Fatalf("state=%q bound_version=%d current_version=%d fingerprint=%q", state, boundVersion, currentVersion, fingerprint)
-	}
-	claimed, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(claimed) != 0 {
-		t.Fatalf("old route was claimable: %+v err=%v", claimed, err)
-	}
-
-	current, err := store.AdminNotificationDispatchChannel(ctx, channel.ID)
-	if err != nil {
-		t.Fatalf("load current route: %v", err)
-	}
-	if queued, err := store.QueueNotificationEvent(ctx, notificationEvent{EventType: "test_notification", TS: "2026-07-13T12:00:02Z"}, []notificationDispatchChannel{current}); err != nil || !queued {
-		t.Fatalf("queue current route: queued=%v err=%v", queued, err)
-	}
-	if err := store.DeleteAdminNotificationChannel(ctx, channel.ID); err != nil {
-		t.Fatalf("delete channel: %v", err)
-	}
-	var active int
-	if err := store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notification_deliveries WHERE state IN ('pending','leased','paused','failed')`).Scan(&active); err != nil {
-		t.Fatalf("count active backlog: %v", err)
-	}
-	if active != 0 {
-		t.Fatalf("active backlog after delete=%d", active)
-	}
-	columns, err := store.tableColumns(ctx, "notification_deliveries")
-	if err != nil {
-		t.Fatalf("delivery columns: %v", err)
-	}
-	if columns["credential"] || columns["destination"] {
-		t.Fatalf("delivery table persisted plaintext routing secrets/targets: %+v", columns)
-	}
-}
-
-func TestNotificationClaimQuarantinesBadCiphertextAndReturnsHealthyChannel(t *testing.T) {
-	store, first := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	enabled := true
-	second, err := store.CreateAdminNotificationChannel(ctx, AdminNotificationChannelCreateRequest{ID: "healthy", Name: "Healthy", Destination: "chat-good", Credential: "credential-good", Enabled: &enabled})
-	if err != nil {
-		t.Fatalf("create healthy channel: %v", err)
-	}
-	event := notificationEvent{EventType: "test_notification", TS: "2026-07-13T12:00:01Z"}
-	if queued, err := store.QueueNotificationEvent(ctx, event, []notificationDispatchChannel{dispatchChannelFromAdmin(first), dispatchChannelFromAdmin(second)}); err != nil || !queued {
-		t.Fatalf("queue channels: queued=%v err=%v", queued, err)
-	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE notification_channels SET credential = ? WHERE id = ?`, notificationCredentialCiphertextPrefix+"broken", first.ID); err != nil {
-		t.Fatalf("damage first credential: %v", err)
-	}
-	claimed, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 32)
-	if err != nil {
-		t.Fatalf("claim after damaged channel: %v", err)
-	}
-	if len(claimed) != 1 || claimed[0].Channel.ID != second.ID || claimed[0].Channel.Credential != "credential-good" {
-		t.Fatalf("healthy claim = %+v", claimed)
-	}
-	var state, lastError string
-	if err := store.db.QueryRowContext(ctx, `SELECT state, last_error FROM notification_deliveries WHERE channel_id = ?`, first.ID).Scan(&state, &lastError); err != nil {
-		t.Fatalf("read quarantined delivery: %v", err)
-	}
-	if state != "failed" || lastError != "notification credential unavailable" {
-		t.Fatalf("quarantine state=%q error=%q", state, lastError)
-	}
-}
-
-func TestRecordNotificationAttemptDetectsLostLease(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	if queued, err := store.QueueNotificationEvent(ctx, notificationEvent{EventType: "test_notification", TS: "2026-07-13T12:00:01Z"}, []notificationDispatchChannel{dispatchChannelFromAdmin(channel)}); err != nil || !queued {
-		t.Fatalf("queue: queued=%v err=%v", queued, err)
-	}
-	claimed, err := store.PendingNotificationDeliveries(ctx, time.Now().UTC(), 1)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("claim: %+v err=%v", claimed, err)
-	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE notification_deliveries SET claim_token = 'replacement' WHERE id = ?`, claimed[0].ID); err != nil {
-		t.Fatalf("replace lease token: %v", err)
-	}
-	if err := store.RecordNotificationDeliveryAttempt(ctx, claimed[0], nil, time.Now().UTC()); !errors.Is(err, errNotificationDeliveryLeaseLost) {
-		t.Fatalf("record with lost lease error=%v, want %v", err, errNotificationDeliveryLeaseLost)
-	}
-}
-
-func TestLegacyNotificationWithoutImmutableRouteIsCanceledFailClosed(t *testing.T) {
-	store, channel := newNotificationConsistencyStore(t)
-	ctx := context.Background()
-	now := time.Now().UTC().Unix()
-	if _, err := store.db.ExecContext(ctx, `
-		INSERT INTO notification_deliveries (
-			event_type, label, node_id, node_name, previous_status, status, detail,
-			channel_id, channel_name, state, attempts, next_attempt_at, last_error,
-			lease_until, claim_token, created_at, updated_at,
-			channel_version, destination_fingerprint
-		) VALUES ('node_offline', '节点离线', 'node-a', 'Node A', 'online', 'offline', '',
-			?, ?, 'pending', 0, ?, '', 0, '', ?, ?, 1, '')
-	`, channel.ID, channel.Name, now, now, now); err != nil {
-		t.Fatalf("insert legacy delivery: %v", err)
-	}
-	if err := store.migrateNotificationRoutingBindings(ctx); err != nil {
-		t.Fatalf("migrate routing: %v", err)
-	}
-	var state, lastError, fingerprint string
-	if err := store.db.QueryRowContext(ctx, `
-		SELECT state, last_error, destination_fingerprint
-		FROM notification_deliveries ORDER BY id DESC LIMIT 1
-	`).Scan(&state, &lastError, &fingerprint); err != nil {
-		t.Fatalf("read migrated delivery: %v", err)
-	}
-	if state != "canceled" || lastError != "legacy notification route unverifiable" || fingerprint == "" {
-		t.Fatalf("legacy route state=%q error=%q fingerprint=%q", state, lastError, fingerprint)
+	if !strings.Contains(logs.String(), `notification failed channel_id=broken node_id=n1 kind=node_offline from=online to=offline attempt=1 error="notification credential unavailable"`) {
+		t.Fatalf("log missing the credential failure line:\n%s", logs.String())
 	}
 }
 

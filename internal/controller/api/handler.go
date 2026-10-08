@@ -11,65 +11,69 @@ import (
 )
 
 type HandlerOptions struct {
-	StaticDir                    string
-	Store                        Store
-	AdminPasswordHash            string
-	TrustedProxies               TrustedProxySet
-	AgentBinaryPath              string
-	AgentVersion                 string
-	NotificationClient           *http.Client
-	TelegramAPIBaseURL           string
-	StaleOfflineScanInterval     time.Duration
-	RenewalNotificationInterval  time.Duration
-	HistoryRetentionInterval     time.Duration
-	NotificationDispatchInterval time.Duration
-	ExchangeRateRefreshInterval  time.Duration
-	ExchangeRateClient           *http.Client
-	ExchangeRateURL              string
-	DisableNotifications         bool
-	BackgroundContext            context.Context
+	StaticDir                string
+	Store                    Store
+	AdminPasswordHash        string
+	TrustedProxies           TrustedProxySet
+	AgentBinaryPath          string
+	AgentVersion             string
+	NotificationClient       *http.Client
+	TelegramAPIBaseURL       string
+	StaleOfflineScanInterval time.Duration
+	HistoryRetentionInterval time.Duration
+	// NotificationReconcileInterval enables the notification reconcile loop.
+	NotificationReconcileInterval time.Duration
+	ExchangeRateRefreshInterval   time.Duration
+	ExchangeRateClient            *http.Client
+	ExchangeRateURL               string
+	DisableNotifications          bool
+	BackgroundContext             context.Context
 }
 
 type handler struct {
-	store                     Store
-	adminPasswordHash         string
-	agentBinaryPath           string
-	agentVersion              string
-	notificationSender        notificationSender
-	loginLimiter              *adminLoginLimiter
-	enrollmentLimiter         *adminLoginLimiter
-	trustedProxies            TrustedProxySet
-	agentQuotas               *agentQuotaManager
-	agentAuthAdmission        *agentAuthAdmissionManager
-	liveHub                   *liveUpdateHub
-	presence                  *agentPresenceManager
-	publicWSGate              *websocketGate
-	agentWSGate               *websocketGate
-	summaryScheduleMu         sync.Mutex
-	summaryPublishTimer       *time.Timer
-	summaryRefreshTimer       *time.Timer
-	summaryLastPublished      time.Time
-	summaryCacheMu            sync.RWMutex
-	summaryCache              []byte
-	summaryCacheUpdated       time.Time
-	summaryCacheDirty         bool
-	summaryCacheDirtyRevision uint64
-	summaryCacheGeneration    uint64
-	summaryCacheFlight        *jsonCacheFlight
-	detailCache               *detailJSONCache
-	detailPublishMu           sync.Mutex
-	detailPublishPending      map[string]bool
-	detailPublishGate         chan struct{}
-	backgroundMu              sync.Mutex
-	backgroundClosing         bool
-	backgroundCtx             context.Context
-	backgroundCancel          context.CancelFunc
-	backgroundWG              sync.WaitGroup
-	notificationDrainMu       sync.Mutex
-	notificationWorkerMu      sync.Mutex
-	notificationWorker        *notificationOutboxWorker
-	performance               *runtimePerformance
-	router                    http.Handler
+	store                       Store
+	adminPasswordHash           string
+	agentBinaryPath             string
+	agentVersion                string
+	notificationSender          notificationSender
+	loginLimiter                *adminLoginLimiter
+	enrollmentLimiter           *adminLoginLimiter
+	trustedProxies              TrustedProxySet
+	agentQuotas                 *agentQuotaManager
+	agentAuthAdmission          *agentAuthAdmissionManager
+	liveHub                     *liveUpdateHub
+	presence                    *agentPresenceManager
+	publicWSGate                *websocketGate
+	agentWSGate                 *websocketGate
+	summaryScheduleMu           sync.Mutex
+	summaryPublishTimer         *time.Timer
+	summaryRefreshTimer         *time.Timer
+	summaryLastPublished        time.Time
+	summaryCacheMu              sync.RWMutex
+	summaryCache                []byte
+	summaryCacheUpdated         time.Time
+	summaryCacheDirty           bool
+	summaryCacheDirtyRevision   uint64
+	summaryCacheGeneration      uint64
+	summaryCacheFlight          *jsonCacheFlight
+	detailCache                 *detailJSONCache
+	detailPublishMu             sync.Mutex
+	detailPublishPending        map[string]bool
+	detailPublishGate           chan struct{}
+	backgroundMu                sync.Mutex
+	backgroundClosing           bool
+	backgroundCtx               context.Context
+	backgroundCancel            context.CancelFunc
+	backgroundWG                sync.WaitGroup
+	notificationReconcilerOnce  sync.Once
+	notificationReconcilerState *notificationReconciler
+	// Test seams for the reconcile loop; zero values use the wall clock, the
+	// process time zone and notificationSendTimeout.
+	notificationClock       func() time.Time
+	notificationLoc         *time.Location
+	notificationSendTimeout time.Duration
+	performance             *runtimePerformance
+	router                  http.Handler
 }
 
 const (
@@ -116,27 +120,27 @@ func NewHandler(options ...HandlerOptions) http.Handler {
 	}
 	backgroundCtx, backgroundCancel := context.WithCancel(backgroundParent)
 	h := &handler{
-		store:                store,
-		adminPasswordHash:    opts.AdminPasswordHash,
-		agentBinaryPath:      opts.AgentBinaryPath,
-		agentVersion:         opts.AgentVersion,
-		notificationSender:   newHTTPNotificationSender(opts.NotificationClient, opts.TelegramAPIBaseURL),
-		loginLimiter:         newAdminLoginLimiter(),
-		enrollmentLimiter:    newAdminLoginLimiter(),
-		trustedProxies:       opts.TrustedProxies,
-		agentQuotas:          newAgentQuotaManager(),
-		agentAuthAdmission:   newAgentAuthAdmissionManager(),
-		liveHub:              newLiveUpdateHub(),
-		presence:             newAgentPresenceManager(),
-		publicWSGate:         newWebSocketGateWithPerKey(publicWebSocketMaxConnections, publicWebSocketMaxConnectionsPerIP),
-		agentWSGate:          newWebSocketGateWithPerKey(agentWebSocketMaxConnections, 0),
-		detailCache:          newDetailJSONCache(),
-		detailPublishPending: make(map[string]bool),
-		detailPublishGate:    make(chan struct{}, detailPublishMaxConcurrent),
-		notificationWorker:   &notificationOutboxWorker{wake: make(chan struct{}, 1)},
-		performance:          newRuntimePerformance(),
-		backgroundCtx:        backgroundCtx,
-		backgroundCancel:     backgroundCancel,
+		store:                       store,
+		adminPasswordHash:           opts.AdminPasswordHash,
+		agentBinaryPath:             opts.AgentBinaryPath,
+		agentVersion:                opts.AgentVersion,
+		notificationSender:          newHTTPNotificationSender(opts.NotificationClient, opts.TelegramAPIBaseURL),
+		loginLimiter:                newAdminLoginLimiter(),
+		enrollmentLimiter:           newAdminLoginLimiter(),
+		trustedProxies:              opts.TrustedProxies,
+		agentQuotas:                 newAgentQuotaManager(),
+		agentAuthAdmission:          newAgentAuthAdmissionManager(),
+		liveHub:                     newLiveUpdateHub(),
+		presence:                    newAgentPresenceManager(),
+		publicWSGate:                newWebSocketGateWithPerKey(publicWebSocketMaxConnections, publicWebSocketMaxConnectionsPerIP),
+		agentWSGate:                 newWebSocketGateWithPerKey(agentWebSocketMaxConnections, 0),
+		detailCache:                 newDetailJSONCache(),
+		detailPublishPending:        make(map[string]bool),
+		detailPublishGate:           make(chan struct{}, detailPublishMaxConcurrent),
+		notificationReconcilerState: newNotificationReconciler(),
+		performance:                 newRuntimePerformance(),
+		backgroundCtx:               backgroundCtx,
+		backgroundCancel:            backgroundCancel,
 	}
 	if opts.DisableNotifications {
 		h.notificationSender = nil
@@ -144,14 +148,11 @@ func NewHandler(options ...HandlerOptions) http.Handler {
 	if opts.StaleOfflineScanInterval > 0 {
 		h.startBackground(func(ctx context.Context) { h.runStaleAgentOfflineScanner(ctx, opts.StaleOfflineScanInterval) })
 	}
-	if opts.RenewalNotificationInterval > 0 {
-		h.startBackground(func(ctx context.Context) { h.runRenewalNotificationScanner(ctx, opts.RenewalNotificationInterval) })
-	}
 	if opts.HistoryRetentionInterval > 0 {
 		h.startBackground(func(ctx context.Context) { h.runHistoryRetention(ctx, opts.HistoryRetentionInterval) })
 	}
-	if opts.NotificationDispatchInterval > 0 {
-		h.ensureNotificationOutboxWorker(opts.NotificationDispatchInterval)
+	if opts.NotificationReconcileInterval > 0 {
+		h.startBackground(func(ctx context.Context) { h.runNotificationReconcileLoop(ctx, opts.NotificationReconcileInterval) })
 	}
 	if opts.ExchangeRateRefreshInterval > 0 {
 		h.startBackground(func(ctx context.Context) {
@@ -175,7 +176,6 @@ func NewHandler(options ...HandlerOptions) http.Handler {
 	mux.HandleFunc("/api/admin/v1/performance", h.handleAdminPerformance)
 	mux.HandleFunc("/api/admin/v1/notification-channels", h.handleAdminNotificationChannels)
 	mux.HandleFunc("/api/admin/v1/notification-channels/", h.handleAdminNotificationChannelResource)
-	mux.HandleFunc("/api/admin/v1/notification-deliveries/", h.handleAdminNotificationDeliveryResource)
 	mux.HandleFunc("/api/admin/v1/alert-rules", h.handleAdminAlertRules)
 	mux.HandleFunc("/api/admin/v1/alert-rules/", h.handleAdminAlertRuleResource)
 	mux.HandleFunc("/api/admin/v1/notification-types/", h.handleAdminNotificationTypeResource)

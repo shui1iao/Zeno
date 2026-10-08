@@ -49,9 +49,6 @@ func (s *sqliteAgentDomain) recordAgentHeartbeatTransitionOnce(ctx context.Conte
 		         EXISTS (
 		           SELECT 1 FROM alert_rule_states ars
 		           WHERE ars.node_id = n.id AND ars.rule_id = 'node_offline' AND ars.active = 1
-		         ) OR EXISTS (
-		           SELECT 1 FROM notification_event_marks nem
-		           WHERE nem.event_type = 'node_offline' AND nem.node_id = n.id AND nem.mark = 'status-active:offline'
 		         )
 		       THEN 1 ELSE 0 END
 		FROM nodes n
@@ -106,10 +103,6 @@ func (s *sqliteAgentDomain) recordAgentHeartbeatTransitionOnce(ctx context.Conte
 			return notificationStatusTransition{}, err
 		}
 	}
-	if err := queueStatusTransitionNotificationTx(ctx, tx, notificationStatusTransition{Previous: previous, Current: current}, now); err != nil {
-		return notificationStatusTransition{}, err
-	}
-
 	if err := tx.Commit(); err != nil {
 		return notificationStatusTransition{}, err
 	}
@@ -265,9 +258,6 @@ func (s *sqliteAgentDomain) recordStaleAgentOfflineTransitionOnce(ctx context.Co
 	}
 	current := notificationNodeSnapshot{ID: previous.ID, DisplayName: previous.DisplayName, Status: "offline", PublicIPv4: previous.PublicIPv4}
 	transition := notificationStatusTransition{Previous: previous, Current: current}
-	if err := queueStatusTransitionNotificationTx(ctx, tx, transition, now); err != nil {
-		return notificationStatusTransition{}, false, err
-	}
 	if err := tx.Commit(); err != nil {
 		return notificationStatusTransition{}, false, err
 	}

@@ -490,6 +490,8 @@ func TestAgentStateResourceRuleMarksWarningAndDispatchesProbeUnhealthy(t *testin
 	}
 
 	handler := NewHandler(telegram.handlerOptions(store))
+	reconcile := handler.(interface{ reconcileNotifications(context.Context) })
+	reconcile.reconcileNotifications(ctx)
 	now := time.Now().UTC().Truncate(time.Second)
 	postAgentHeartbeat(t, handler, now.Unix(), "online")
 	body := map[string]any{
@@ -526,6 +528,7 @@ func TestAgentStateResourceRuleMarksWarningAndDispatchesProbeUnhealthy(t *testin
 	if status != "warning" {
 		t.Fatalf("node status = %q, want warning after enabled CPU rule threshold is exceeded", status)
 	}
+	reconcile.reconcileNotifications(ctx)
 	paths, forms, errors := telegram.waitForCalls(t, 1)
 	if len(errors) != 0 {
 		t.Fatalf("telegram handler errors = %+v", errors)

@@ -32,7 +32,10 @@ type runtimePerformanceSnapshot struct {
 		LastBytes      uint64  `json:"last_bytes"`
 	} `json:"summary"`
 	SQLite struct {
-		BusyRetries          uint64 `json:"busy_retries"`
+		BusyRetries uint64 `json:"busy_retries"`
+		// The outbox_* keys are kept for API compatibility and now describe
+		// notification_states: pending = rows with an undelivered target,
+		// failed = rows whose current target failed at least once, leased = 0.
 		OutboxPending        int64  `json:"outbox_pending"`
 		OutboxLeased         int64  `json:"outbox_leased"`
 		OutboxFailed         int64  `json:"outbox_failed"`
@@ -107,11 +110,10 @@ func (s *sqliteMonitoringDomain) RuntimePerformance(ctx context.Context) (sqlite
 	snapshot := sqliteRuntimePerformance{BusyRetries: s.writes.busyRetries.Load()}
 	if err := s.db.QueryRowContext(ctx, `
 		SELECT
-			COALESCE(SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN state = 'leased' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0)
-		FROM notification_deliveries
-	`).Scan(&snapshot.OutboxPending, &snapshot.OutboxLeased, &snapshot.OutboxFailed); err != nil {
+			COALESCE(SUM(CASE WHEN pending_target <> '' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN pending_attempts > 0 THEN 1 ELSE 0 END), 0)
+		FROM notification_states
+	`).Scan(&snapshot.OutboxPending, &snapshot.OutboxFailed); err != nil {
 		return sqliteRuntimePerformance{}, err
 	}
 	// MAX(rowid) is index-local and remains cheap on multi-gigabyte databases.

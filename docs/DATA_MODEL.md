@@ -287,21 +287,54 @@ CREATE TABLE notification_deliveries (
 
 ```
 
-`credential` 不通过 Admin API 响应返回；delivery 也不复制 destination 或 credential，只绑定
-`channel_version` 和不可逆 destination fingerprint。渠道目标、凭据或启用状态变化，以及渠道删除，
-都会把旧 generation 的积压明确变成 terminal `canceled`；历史清理可删除该状态。
+```sql
+CREATE TABLE notification_states (
+  channel_id TEXT NOT NULL,
+  node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,                 -- node_offline / probe_unhealthy / renewal_due
+  notified TEXT NOT NULL DEFAULT '',  -- 已告诉用户的状态：online/offline、ok/warning、<dueDate>#<threshold>
+  notified_detail TEXT NOT NULL DEFAULT '', -- 资源告警时的规则名，例如 "CPU、内存"
+  incident_from INTEGER NOT NULL DEFAULT 0, -- 事件起点（unix 秒），首次观察到告警状态时写入
+  pending_target TEXT NOT NULL DEFAULT '',
+  pending_since INTEGER NOT NULL DEFAULT 0, -- 首次观察到 pending_target 的时间
+  pending_attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT NOT NULL DEFAULT '',
+  channel_version INTEGER NOT NULL DEFAULT 1,
+  destination_fingerprint TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (channel_id, node_id, kind)
+);
+
+CREATE TABLE notification_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts INTEGER NOT NULL,
+  channel_id TEXT NOT NULL DEFAULT '',
+  node_id TEXT NOT NULL DEFAULT '',
+  node_name TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT '',
+  from_state TEXT NOT NULL DEFAULT '',
+  to_state TEXT NOT NULL DEFAULT '',
+  outcome TEXT NOT NULL,              -- sent / failed / dropped / baseline / rebaseline
+  attempt INTEGER NOT NULL DEFAULT 0,
+  error TEXT NOT NULL DEFAULT '',     -- 脱敏错误
+  message TEXT NOT NULL DEFAULT ''
+);
+```
+
+`credential` 不通过 Admin API 响应返回。`notification_states` 只保存“已告诉用户的状态”，真实状态
+每轮从 `nodes.status`、`alert_rule_states` 和续费规则读取，不维护影子状态；行内记录的
+`channel_version` + `destination_fingerprint` 与渠道当前绑定不一致时静默重新基线。节点删除时级联
+删除，渠道删除时一并删除对应行。`notification_log` 记录 sent/failed/dropped/baseline/rebaseline，
+只保存脱敏错误，纳入通知历史保留期清理。对账与发送规则见 `docs/API.md` 的“通知发送”。
+
 `notification_types` 仅保留旧 API 兼容，发送开关以 `alert_rules.enabled` 为准；兼容 PATCH 的两表写入
 在同一事务内完成。
 
-通知事件与 incident/续费按日去重标记在同一事务中写入 outbox；同一渠道、节点和事件流通过
-`causal_predecessor_event_id` 串联。未开始尝试的离线可由恢复 supersede；一旦离线投递开始尝试，
-恢复必须等待，前驱最终失败时恢复转为 `canceled`。`event_ts` 保存原事件时间，重试沿用稳定
-`event_id`。
-
-发送语义是 **at-least-once**：单次只 claim 一条，5 秒发送超时小于 30 秒 lease；ack 使用
-claim token 并检查 RowsAffected。远端已接受后 Controller 在 ack 前崩溃仍可能重发，支持去重的
-接收端应使用稳定 `event_id`。失败按退避策略最多尝试 5 次，Controller 重启后继续处理；投递
-历史只保存净化后的错误和不可逆绑定，不保存 Bot Token、明文接收目标或请求 URL。
+`notification_deliveries` 和 `notification_event_marks` 是旧 outbox 模型的表，当前版本保留表结构和
+数据（便于回滚），但不再写入、清理或读取（升级时的一次性种子迁移除外）。种子迁移
+`20261008_notification_reconcile_seed_v1` 对每个启用渠道、每个节点的 `node_offline`/`probe_unhealthy`，
+取与渠道当前绑定一致、`state = 'delivered'` 的最新一行作为 `notified`；续费取今天之前的最新提醒点，
+今天已有 `notification_event_marks` 标记的也算已通知。没有已送达记录的组合由首轮对账静默基线。
 
 ## alert_rules / alert_rule_node_scopes / alert_rule_renewal_days / alert_rule_states
 

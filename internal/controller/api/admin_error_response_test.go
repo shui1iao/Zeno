@@ -27,7 +27,6 @@ func TestWriteAdminErrorStatusMapping(t *testing.T) {
 		{errNodeNotFound, http.StatusNotFound, "not found"},
 		{errProbeTargetNotFound, http.StatusNotFound, "not found"},
 		{errNotificationChannelNotFound, http.StatusNotFound, "not found"},
-		{errNotificationDeliveryNotFound, http.StatusNotFound, "not found"},
 		{errNotificationTypeNotFound, http.StatusNotFound, "not found"},
 		{errAlertRuleNotFound, http.StatusNotFound, "not found"},
 		{errInvalidAdminSettingsUpdate, http.StatusBadRequest, "bad request"},
@@ -40,7 +39,6 @@ func TestWriteAdminErrorStatusMapping(t *testing.T) {
 		{errInvalidAdminPasswordUpdate, http.StatusBadRequest, "bad request"},
 		{errAdminSettingsConflict, http.StatusConflict, "settings changed"},
 		{errNotificationCredentialKeyRequired, http.StatusConflict, "notification key unavailable"},
-		{errNotificationDeliveryNotFailed, http.StatusConflict, "notification delivery is not failed"},
 		{errNodeAlreadyExists, http.StatusConflict, "already exists"},
 		{errProbeTargetAlreadyExists, http.StatusConflict, "already exists"},
 		{errNotificationChannelAlreadyExists, http.StatusConflict, "already exists"},
@@ -115,11 +113,10 @@ func TestAdminErrorResponsesCoverAllAdminErrors(t *testing.T) {
 		// Internal to the deletion batch loop: it means another batch remains to
 		// process, and is consumed as control flow rather than returned.
 		"admin deletion history remains": "admin_delete_batches.go",
-		// Outbox worker signals, never surfaced on an admin request: the lease was
-		// taken by another worker, or a provider call's outcome is unknown and the
-		// delivery must be retried rather than reported.
-		"notification delivery lease lost":      "notification_outbox.go",
-		"notification delivery outcome unknown": "notification_dispatch.go",
+		// Reconcile loop signal, never surfaced on an admin request: a channel
+		// credential could not be decrypted, so that channel's deliveries fail and
+		// are retried.
+		"notification credential unavailable": "notification_reconcile_store.go",
 	}
 	filtered := missing[:0]
 	for _, item := range missing {

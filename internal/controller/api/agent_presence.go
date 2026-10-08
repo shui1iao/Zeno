@@ -249,11 +249,11 @@ func (h *handler) dispatchStaleAgentOfflineChecks(ctx context.Context) {
 }
 
 func (h *handler) dispatchStaleAgentOfflineNode(ctx context.Context, store staleAgentOfflineStore, nodeID string, now time.Time) bool {
-	transition, ok, err := store.RecordStaleAgentOfflineTransition(ctx, nodeID, now)
+	_, ok, err := store.RecordStaleAgentOfflineTransition(ctx, nodeID, now)
 	if err != nil || !ok {
 		return false
 	}
-	h.dispatchAgentStatusNotification(store, transition, now)
+	h.wakeNotificationReconcile()
 	return true
 }
 

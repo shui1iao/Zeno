@@ -3,38 +3,9 @@ package api
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
-
-func (h *handler) handleAdminNotificationDeliveryResource(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/admin/v1/notification-deliveries/"), "/")
-	parts := strings.Split(path, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] != "retry" {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	deliveryID, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil || deliveryID <= 0 {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	store, ok := h.authorizeAdminRequest(w, r)
-	if !ok {
-		return
-	}
-	if err := store.RetryFailedNotificationDelivery(r.Context(), deliveryID, time.Now().UTC()); err != nil {
-		writeAdminError(w, err)
-		return
-	}
-	h.wakeNotificationOutbox()
-	writeJSON(w, http.StatusOK, AdminNotificationRetryResponse{DeliveryID: deliveryID, State: "pending"})
-}
 
 func (h *handler) handleAdminNotificationChannels(w http.ResponseWriter, r *http.Request) {
 	handleAdminReadMutation(h, w, r, http.MethodPost, http.StatusCreated, readAdminNotificationChannels, createAdminNotificationChannel)
@@ -109,9 +80,9 @@ func (h *handler) handleAdminNotificationChannelTest(w http.ResponseWriter, r *h
 	}
 	now := time.Now().UTC()
 	event := adminTestNotificationEvent(now)
-	sendCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	sendCtx, cancel := context.WithTimeout(r.Context(), h.notificationTimeout())
 	defer cancel()
-	sendErr := h.notificationSender.Send(sendCtx, channel, event)
+	sendErr := h.notificationSender.Send(sendCtx, channel, notificationTestMessageText)
 	delivery := AdminNotificationDelivery{
 		EventType:      event.EventType,
 		Label:          event.Label,

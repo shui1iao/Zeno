@@ -486,24 +486,16 @@ func TestNotificationDispatchRequiresEnabledAlertRuleForEvent(t *testing.T) {
 	if _, err := store.UpdateAdminNotificationType(ctx, "node_offline", AdminNotificationTypeUpdateRequest{Enabled: &enabled}); err != nil {
 		t.Fatalf("enable node_offline notification type: %v", err)
 	}
-	label, channels, err := store.EnabledNotificationChannelsForEvent(ctx, "node_offline", "example-node-a")
-	if err != nil {
-		t.Fatalf("enabled channels before disabling rule: %v", err)
-	}
-	if label != "离线" || len(channels) != 1 {
-		t.Fatalf("channels before disabling rule label=%q len=%d, want one node_offline channel", label, len(channels))
+	if rules := notificationRulesInScope(t, store, "node_offline", "example-node-a"); len(rules) != 1 {
+		t.Fatalf("rules before disabling = %+v, want the node_offline rule", rules)
 	}
 
 	disabled := false
 	if _, err := store.UpdateAdminAlertRule(ctx, "node_offline", AdminAlertRuleUpdateRequest{Enabled: &disabled}); err != nil {
 		t.Fatalf("disable node offline rule: %v", err)
 	}
-	label, channels, err = store.EnabledNotificationChannelsForEvent(ctx, "node_offline", "example-node-a")
-	if err != nil {
-		t.Fatalf("enabled channels after disabling rule: %v", err)
-	}
-	if label != "离线" || len(channels) != 0 {
-		t.Fatalf("channels after disabling node_offline rule label=%q len=%d, want no dispatch channels", label, len(channels))
+	if rules := notificationRulesInScope(t, store, "node_offline", "example-node-a"); len(rules) != 0 {
+		t.Fatalf("rules after disabling = %+v, want none so reconcile pauses offline notifications", rules)
 	}
 }
 
@@ -697,19 +689,11 @@ func TestNotificationDispatchRespectsAlertRuleNodeScope(t *testing.T) {
 		t.Fatalf("scope node_offline rule: %v", err)
 	}
 
-	label, exampleNodeAChannels, err := store.EnabledNotificationChannelsForEvent(ctx, "node_offline", "example-node-a")
-	if err != nil {
-		t.Fatalf("example-node-a channels: %v", err)
+	if rules := notificationRulesInScope(t, store, "node_offline", "example-node-a"); len(rules) != 0 {
+		t.Fatalf("example-node-a rules = %+v, want none outside the node scope", rules)
 	}
-	if label != "离线" || len(exampleNodeAChannels) != 0 {
-		t.Fatalf("example-node-a channels label=%q len=%d, want no channels outside node scope", label, len(exampleNodeAChannels))
-	}
-	label, backupChannels, err := store.EnabledNotificationChannelsForEvent(ctx, "node_offline", "backup")
-	if err != nil {
-		t.Fatalf("backup channels: %v", err)
-	}
-	if label != "离线" || len(backupChannels) != 1 {
-		t.Fatalf("backup channels label=%q len=%d, want one scoped channel", label, len(backupChannels))
+	if rules := notificationRulesInScope(t, store, "node_offline", "backup"); len(rules) != 1 {
+		t.Fatalf("backup rules = %+v, want the scoped rule", rules)
 	}
 }
 

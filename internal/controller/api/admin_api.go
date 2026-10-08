@@ -30,7 +30,6 @@ type adminStore interface {
 	CreateAdminNotificationChannel(ctx context.Context, create AdminNotificationChannelCreateRequest) (AdminNotificationChannel, error)
 	UpdateAdminNotificationChannel(ctx context.Context, channelID string, update AdminNotificationChannelUpdateRequest) (AdminNotificationChannel, error)
 	DeleteAdminNotificationChannel(ctx context.Context, channelID string) error
-	RetryFailedNotificationDelivery(ctx context.Context, deliveryID int64, now time.Time) error
 	UpdateAdminNotificationType(ctx context.Context, eventType string, update AdminNotificationTypeUpdateRequest) (AdminNotificationType, error)
 	UpdateAdminAlertRule(ctx context.Context, ruleID string, update AdminAlertRuleUpdateRequest) (AdminAlertRule, error)
 }
@@ -764,7 +763,7 @@ var adminErrorResponses = []struct {
 	{http.StatusGone, "notification type is managed by alert rules", []error{errNotificationTypeGone}},
 	{http.StatusNotFound, "not found", []error{
 		errNodeNotFound, errProbeTargetNotFound, errNotificationChannelNotFound,
-		errNotificationDeliveryNotFound, errNotificationTypeNotFound, errAlertRuleNotFound,
+		errNotificationTypeNotFound, errAlertRuleNotFound,
 	}},
 	// Validation failures collapse to a single opaque message on purpose: the
 	// admin UI validates client-side, so a detailed server message would only
@@ -777,7 +776,6 @@ var adminErrorResponses = []struct {
 	}},
 	{http.StatusConflict, "settings changed", []error{errAdminSettingsConflict}},
 	{http.StatusConflict, "notification key unavailable", []error{errNotificationCredentialKeyRequired}},
-	{http.StatusConflict, "notification delivery is not failed", []error{errNotificationDeliveryNotFailed}},
 	{http.StatusConflict, "already exists", []error{
 		errNodeAlreadyExists, errProbeTargetAlreadyExists, errNotificationChannelAlreadyExists,
 	}},

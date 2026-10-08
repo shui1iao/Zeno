@@ -146,8 +146,9 @@ Public summary 会返回 `services`，按后台探针目标显示顺序列出有
 当前通知模型保持简单：
 
 - 渠道：Telegram-only。
-- 事件：`node_offline`、`probe_unhealthy`、手动 `test_notification`。
-- Agent heartbeat 触发的通知异步发送，不能阻塞 Agent 上报。
+- 事件：`node_offline`、`probe_unhealthy`、`renewal_due`、手动 `test_notification`。
+- 对账模型：每个（渠道、节点、类别）只保存已告诉用户的状态 `notified`，真实状态每轮从已存储的 `nodes.status`、资源规则命中状态和续费规则读取；单个对账 goroutine 每 2 秒一轮，状态写入提交后非阻塞唤醒。不一致时按当前状态生成一条消息，发送成功才推进 `notified`，任何失败都下一轮重试（按渠道退避，429 按 `retry_after`）；恢复需持续 `MAX(duration_sec)`；告警没发出去而状态已回落时只记 `dropped` 日志。首次见到时静默基线。
+- 通知发送不在 Agent 请求路径上，不能阻塞 Agent 上报；发送期间不持有数据库事务。
 - Admin 手动测试发送同步返回本次 sanitized 结果，方便操作员立即验证配置。
 
 ## 通知类型

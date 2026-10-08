@@ -242,15 +242,18 @@ func TestStaleOfflineNotificationDeliveryDoesNotBlockScanner(t *testing.T) {
 		t.Fatalf("enable notification type: %v", err)
 	}
 
-	started := time.Now()
 	staleSeen := time.Now().UTC().Add(-nodeHeartbeatOfflineAfter - time.Second)
 	if _, err := store.db.ExecContext(ctx, `UPDATE nodes SET status = 'online', last_seen_at = ? WHERE id = 'example-node-a'`, staleSeen.Unix()); err != nil {
 		t.Fatalf("set stale heartbeat: %v", err)
 	}
-	httpHandler := NewHandler(HandlerOptions{Store: store, NotificationClient: slowTelegram.Client(), TelegramAPIBaseURL: slowTelegram.URL})
+	httpHandler := NewHandler(HandlerOptions{Store: store, NotificationClient: slowTelegram.Client(), TelegramAPIBaseURL: slowTelegram.URL, NotificationReconcileInterval: time.Hour})
 	defer cleanupTestHandler(t, httpHandler)
 	defer close(release)
 	h := httpHandler.(*handler)
+	// Record the baseline before the stale scan so the scan's wake produces
+	// the offline alert on the reconcile goroutine.
+	h.reconcileNotifications(ctx)
+	started := time.Now()
 	h.dispatchStaleAgentOfflineChecks(ctx)
 	elapsed := time.Since(started)
 	if elapsed > 150*time.Millisecond {
@@ -287,7 +290,9 @@ func TestStaleAgentOfflineCheckDispatchesWhenPublicStatusExpires(t *testing.T) {
 
 	telegram := newTelegramTestCapture(t)
 	h := &handler{store: store, notificationSender: newHTTPNotificationSender(telegram.server.Client(), telegram.server.URL), liveHub: newLiveUpdateHub(), presence: newAgentPresenceManager()}
+	h.reconcileNotifications(ctx)
 	h.dispatchStaleAgentOfflineChecks(ctx)
+	h.reconcileNotifications(ctx)
 
 	paths, forms, errors := telegram.waitForCalls(t, 1)
 	if len(errors) != 0 {
@@ -376,7 +381,11 @@ func TestAgentHeartbeatDoesNotDispatchRecoveryAfterStaleHeartbeatOffline(t *test
 		t.Fatalf("enable notification type: %v", err)
 	}
 
-	postAgentHeartbeat(t, NewHandler(telegram.handlerOptions(store)), time.Now().UTC().Unix(), "online")
+	httpHandler := NewHandler(telegram.handlerOptions(store))
+	h := httpHandler.(*handler)
+	h.reconcileNotifications(ctx)
+	postAgentHeartbeat(t, httpHandler, time.Now().UTC().Unix(), "online")
+	h.reconcileNotifications(ctx)
 	paths, forms, errors := telegram.waitForCalls(t, 0)
 	if len(errors) != 0 {
 		t.Fatalf("telegram handler errors = %+v", errors)
@@ -409,14 +418,15 @@ func TestAgentStateDispatchesRecoveryAfterPersistedOffline(t *testing.T) {
 	}
 
 	telegram := newTelegramTestCapture(t)
-	h := &handler{store: store, notificationSender: newHTTPNotificationSender(telegram.server.Client(), telegram.server.URL), liveHub: newLiveUpdateHub(), presence: newAgentPresenceManager()}
-	if transition, ok, err := store.RecordStaleAgentOfflineTransition(ctx, "example-node-a", time.Now().UTC()); err != nil {
+	clock := newFakeNotificationClock(time.Now().UTC())
+	h := &handler{store: store, notificationSender: newHTTPNotificationSender(telegram.server.Client(), telegram.server.URL), liveHub: newLiveUpdateHub(), presence: newAgentPresenceManager(), notificationClock: clock.Now}
+	h.reconcileNotifications(ctx)
+	if _, ok, err := store.RecordStaleAgentOfflineTransition(ctx, "example-node-a", time.Now().UTC()); err != nil {
 		t.Fatalf("record stale offline transition: %v", err)
 	} else if !ok {
 		t.Fatalf("stale offline transition skipped, want persisted offline")
-	} else {
-		h.dispatchAgentStatusNotification(store, transition, time.Now().UTC())
 	}
+	h.reconcileNotifications(ctx)
 	paths, forms, errors := telegram.waitForCalls(t, 1)
 	if len(errors) != 0 {
 		t.Fatalf("telegram handler errors after offline = %+v", errors)
@@ -426,14 +436,14 @@ func TestAgentStateDispatchesRecoveryAfterPersistedOffline(t *testing.T) {
 	}
 
 	postAgentState(t, h.handleAgentState, time.Now().UTC().Unix(), 22.5)
+	clock.Advance(2 * time.Second)
+	h.reconcileNotifications(ctx)
 	paths, forms, errors = telegram.waitForCalls(t, 1)
 	if len(errors) != 0 || len(paths) != 1 || len(forms) != 1 {
 		t.Fatalf("recovery was not held for stability: paths=%+v forms=%+v errors=%+v", paths, forms, errors)
 	}
-	if _, err := store.db.ExecContext(ctx, `UPDATE notification_deliveries SET next_attempt_at = 0 WHERE status = 'online' AND state = 'pending'`); err != nil {
-		t.Fatalf("make stable recovery due: %v", err)
-	}
-	h.dispatchPendingNotificationDeliveries(ctx)
+	clock.Advance(nodeHeartbeatOfflineAfter)
+	h.reconcileNotifications(ctx)
 	paths, forms, errors = telegram.waitForCalls(t, 2)
 	if len(errors) != 0 {
 		t.Fatalf("telegram handler errors after recovery = %+v", errors)
@@ -464,10 +474,6 @@ func TestAgentHeartbeatTransitionTreatsReceivedHeartbeatAsFreshLiveness(t *testi
 	if transition.Previous.Status != "online" || transition.Current.Status != "online" {
 		t.Fatalf("transition = %+v, want stored online -> online so stale public state does not send recovery-only notifications", transition)
 	}
-	eventType, ok := notificationEventTypeForStatusChange(transition.Previous.Status, transition.Current.Status)
-	if ok || eventType != "" {
-		t.Fatalf("event type = %q ok=%v, want no recovery-only notification", eventType, ok)
-	}
 }
 func TestAgentHeartbeatTransitionTreatsExplicitOfflineAsOnlineLiveness(t *testing.T) {
 	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "zeno.db"))
@@ -490,10 +496,6 @@ func TestAgentHeartbeatTransitionTreatsExplicitOfflineAsOnlineLiveness(t *testin
 	}
 	if transition.Previous.Status != "online" || transition.Current.Status != "online" {
 		t.Fatalf("transition = %+v, want online -> online liveness", transition)
-	}
-	eventType, ok := notificationEventTypeForStatusChange(transition.Previous.Status, transition.Current.Status)
-	if ok || eventType != "" {
-		t.Fatalf("event type = %q ok=%v, want no offline event", eventType, ok)
 	}
 }
 func TestAgentHeartbeatOfflineCompatibilityDoesNotRejectHeartbeat(t *testing.T) {

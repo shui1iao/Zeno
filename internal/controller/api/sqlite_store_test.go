@@ -197,12 +197,13 @@ func TestOpenSQLiteStoreMigratesLegacyNotificationDeliveryLeaseColumnsBeforeInde
 	if indexCount != 1 {
 		t.Fatalf("expected claim index after migration, got %d", indexCount)
 	}
+	var state string
 	var requestStartedAt int64
-	if err := store.db.QueryRowContext(ctx, `SELECT request_started_at FROM notification_deliveries WHERE id = 1`).Scan(&requestStartedAt); err != nil {
-		t.Fatalf("read migrated notification request phase: %v", err)
+	if err := store.db.QueryRowContext(ctx, `SELECT state, request_started_at FROM notification_deliveries WHERE id = 1`).Scan(&state, &requestStartedAt); err != nil {
+		t.Fatalf("read legacy notification delivery: %v", err)
 	}
-	if requestStartedAt != 200 {
-		t.Fatalf("migrated request_started_at = %d, want conservative legacy timestamp 200", requestStartedAt)
+	if state != "leased" || requestStartedAt != 0 {
+		t.Fatalf("legacy row state=%q request_started_at=%d, want untouched (this release never writes notification_deliveries)", state, requestStartedAt)
 	}
 }
 
