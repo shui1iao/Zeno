@@ -50,10 +50,10 @@ func TestAdminNodeInstallCommandIssuesOneTimeEnrollmentWithoutRotatingActiveAgen
 	if response.NodeID != "example-node-a" {
 		t.Fatalf("node_id = %q, want example-node-a", response.NodeID)
 	}
-	if !strings.Contains(response.Command, "https://zeno.shuijiao.de/agent/install.sh") || !strings.Contains(response.Command, "bash -o pipefail") || !strings.Contains(response.Command, "ZENO_CONTROLLER_URL='https://probe.example.com'") || !strings.Contains(response.Command, "ZENO_NODE_ID='example-node-a'") || !strings.Contains(response.Command, "ZENO_AGENT_VERSION='testsha'") {
+	if !strings.Contains(response.Command, "https://zeno.siaoz.si/agent/install.sh") || !strings.Contains(response.Command, "bash -o pipefail") || !strings.Contains(response.Command, "ZENO_CONTROLLER_URL='https://probe.example.com'") || !strings.Contains(response.Command, "ZENO_NODE_ID='example-node-a'") || !strings.Contains(response.Command, "ZENO_AGENT_VERSION='testsha'") {
 		t.Fatalf("install command missing proxied installer, pipefail, controller URL, node id, or version: %s", response.Command)
 	}
-	if !strings.Contains(response.Commands["macos"], "https://zeno.shuijiao.de/agent/install.sh") || !strings.Contains(response.Commands["windows"], "https://zeno.shuijiao.de/agent/install.ps1") || !strings.Contains(response.Commands["windows"], "$env:ZENO_AGENT_VERSION='testsha'") {
+	if !strings.Contains(response.Commands["macos"], "https://zeno.siaoz.si/agent/install.sh") || !strings.Contains(response.Commands["windows"], "https://zeno.siaoz.si/agent/install.ps1") || !strings.Contains(response.Commands["windows"], "$env:ZENO_AGENT_VERSION='testsha'") {
 		t.Fatalf("install commands should include macOS and Windows proxied variants: %#v", response.Commands)
 	}
 	if !strings.Contains(response.Command, "ZENO_ENROLLMENT_TOKEN='") || strings.Contains(response.Command, "ZENO_AGENT_TOKEN='") || !strings.Contains(response.Command, "sudo env") {
@@ -167,7 +167,7 @@ func TestAdminNodeInstallCommandPrefersConfiguredAgentControllerURL(t *testing.T
 	if err := json.NewDecoder(bytes.NewBufferString(recorder.Body.String())).Decode(&response); err != nil {
 		t.Fatalf("decode install command: %v", err)
 	}
-	if !strings.Contains(response.Command, "ZENO_CONTROLLER_URL='https://zeno.example.com'") || !strings.Contains(response.Command, "zeno.shuijiao.de/agent/install.sh") {
+	if !strings.Contains(response.Command, "ZENO_CONTROLLER_URL='https://zeno.example.com'") || !strings.Contains(response.Command, "zeno.siaoz.si/agent/install.sh") {
 		t.Fatalf("install command should use configured agent controller URL and proxied installer: %s", response.Command)
 	}
 	if !strings.Contains(response.Commands["windows"], "$env:ZENO_CONTROLLER_URL='https://zeno.example.com'") {

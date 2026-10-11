@@ -214,8 +214,8 @@ func buildAgentInstallCommands(controllerURL, nodeID, enrollmentToken, agentVers
 		version := strings.TrimSpace(agentVersion)
 		windowsVersionEnv = "$env:ZENO_AGENT_VERSION=" + powershellSingleQuote(version) + "; "
 	}
-	installURL := "https://zeno.shuijiao.de/agent/install.sh"
-	windowsInstallURL := "https://zeno.shuijiao.de/agent/install.ps1"
+	installURL := "https://zeno.siaoz.si/agent/install.sh"
+	windowsInstallURL := "https://zeno.siaoz.si/agent/install.ps1"
 	insecureEnv := ""
 	windowsInsecureEnv := ""
 	if parsed, err := url.Parse(controllerURL); err == nil && parsed.Scheme == "http" && !loopbackURLHost(parsed.Hostname()) {

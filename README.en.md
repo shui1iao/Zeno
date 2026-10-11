@@ -8,7 +8,7 @@
 
 **A lightweight, self-hosted dashboard for server health, traffic, latency, and renewal costs.**
 
-[Live demo](https://shuijiao.de/) · [Quick start](#quick-start) · [Deployment guide](docs/SELF_HOSTING.md) · [简体中文](README.md)
+[Live demo](https://siaoz.si/) · [Quick start](#quick-start) · [Deployment guide](docs/SELF_HOSTING.md) · [简体中文](README.md)
 
 ![Zeno server monitoring dashboard](docs/assets/zeno-dashboard.png)
 
@@ -44,7 +44,7 @@ Run as root:
   set -Eeuo pipefail
   installer=$(mktemp)
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://zeno.shuijiao.de/install.sh -o "$installer"
+  curl -fsSL https://zeno.siaoz.si/install.sh -o "$installer"
   bash "$installer"
 )
 ```
@@ -128,7 +128,7 @@ The recommended stable image is convenient for a first deployment. For long-live
   set -Eeuo pipefail
   installer=$(mktemp)
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://zeno.shuijiao.de/install.sh -o "$installer"
+  curl -fsSL https://zeno.siaoz.si/install.sh -o "$installer"
   env \
     ZENO_INSTALL_DIR=/opt/zeno \
     ZENO_HOST_PORT=18980 \
@@ -146,8 +146,8 @@ Download and verify an installer for an explicit version:
 
 ```bash
 version=vX.Y.Z
-curl -fsS "https://zeno.shuijiao.de/$version/install.sh" -o install.sh
-curl -fsS "https://zeno.shuijiao.de/$version/install.sh.sha256" -o install.sh.sha256
+curl -fsS "https://zeno.siaoz.si/$version/install.sh" -o install.sh
+curl -fsS "https://zeno.siaoz.si/$version/install.sh.sha256" -o install.sh.sha256
 sha256sum -c install.sh.sha256
 sudo env ZENO_IMAGE="ghcr.io/shui1iao/zeno:$version" bash install.sh
 rm -f install.sh install.sh.sha256

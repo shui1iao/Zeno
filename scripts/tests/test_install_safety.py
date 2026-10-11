@@ -766,9 +766,9 @@ class InstallSafetyTest(unittest.TestCase):
             self.assertIn('ALL', text)
             self.assertIn('no-new-privileges:true', text)
             self.assertIn('127.0.0.1:${ZENO_HOST_PORT:-18980}:18980', text)
-        self.assertIn('https://zeno.shuijiao.de/agent/install.sh', script)
-        self.assertIn('https://zeno.shuijiao.de/agent/install.ps1', script)
-        self.assertIn('PUBLIC_INSTALL_URL="https://zeno.shuijiao.de/install.sh"', script)
+        self.assertIn('https://zeno.siaoz.si/agent/install.sh', script)
+        self.assertIn('https://zeno.siaoz.si/agent/install.ps1', script)
+        self.assertIn('PUBLIC_INSTALL_URL="https://zeno.siaoz.si/install.sh"', script)
         self.assertIn('INSTALL_MARKER_NAME=".zeno-installation"', script)
         self.assertIn('ZENO_NOTIFICATION_AUTHORITY_KEYRING_FILE: /run/secrets/zeno_notification_authority_keyring.json', compose)
         self.assertIn('ZENO_NOTIFICATION_CREDENTIAL_KEYRING_FILE: /run/secrets/zeno_notification_credential_keyring.json', compose)
@@ -816,13 +816,13 @@ class InstallSafetyTest(unittest.TestCase):
         ]
         combined = '\n'.join(path.read_text() for path in files)
         self.assertNotIn('bash <(curl', combined)
-        self.assertNotIn('https://zeno.shuijiao.de | bash', combined)
-        self.assertIn('https://zeno.shuijiao.de/install.sh', combined)
+        self.assertNotIn('https://zeno.siaoz.si | bash', combined)
+        self.assertIn('https://zeno.siaoz.si/install.sh', combined)
         for path in files[:3]:
             text = path.read_text()
             self.assertIn('installer=$(mktemp)', text)
             self.assertIn("trap 'rm -f \"$installer\"' EXIT", text)
-            self.assertIn('curl -fsSL https://zeno.shuijiao.de/install.sh -o "$installer"', text)
+            self.assertIn('curl -fsSL https://zeno.siaoz.si/install.sh -o "$installer"', text)
 
     def test_release_workflow_publishes_github_signed_image_attestation(self):
         workflow = (ROOT / '.github' / 'workflows' / 'docker.yml').read_text()

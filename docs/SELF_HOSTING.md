@@ -11,7 +11,7 @@ Zeno Controller 官方自部署方式是 Docker Compose 一键安装器。Contro
   set -Eeuo pipefail
   installer=$(mktemp)
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://zeno.shuijiao.de/install.sh -o "$installer"
+  curl -fsSL https://zeno.siaoz.si/install.sh -o "$installer"
   sudo bash "$installer"
 )
 ```
@@ -40,7 +40,7 @@ Zeno Controller 官方自部署方式是 Docker Compose 一键安装器。Contro
   set -Eeuo pipefail
   installer=$(mktemp)
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://zeno.shuijiao.de/install.sh -o "$installer"
+  curl -fsSL https://zeno.siaoz.si/install.sh -o "$installer"
   sudo env \
     ZENO_INSTALL_DIR=/opt/zeno \
     ZENO_HOST_PORT=18980 \
@@ -91,7 +91,7 @@ server {
   set -Eeuo pipefail
   installer=$(mktemp)
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://zeno.shuijiao.de/install.sh -o "$installer"
+  curl -fsSL https://zeno.siaoz.si/install.sh -o "$installer"
   sudo env ZENO_TRUSTED_PROXIES=192.0.2.10/32 bash "$installer"
 )
 ```

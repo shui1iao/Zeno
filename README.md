@@ -8,7 +8,7 @@
 
 **轻量、自托管的服务器监控面板——统一查看状态、流量、延迟与续费。**
 
-[在线演示](https://shuijiao.de/) · [快速开始](#快速开始) · [部署文档](docs/SELF_HOSTING.md) · [English](README.en.md)
+[在线演示](https://siaoz.si/) · [快速开始](#快速开始) · [部署文档](docs/SELF_HOSTING.md) · [English](README.en.md)
 
 ![Zeno 服务器监控面板](docs/assets/zeno-dashboard.png)
 
@@ -44,7 +44,7 @@ Zeno 面向管理自有 VPS 和服务器的个人与小团队。Controller 提�
   set -Eeuo pipefail
   installer=$(mktemp)
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://zeno.shuijiao.de/install.sh -o "$installer"
+  curl -fsSL https://zeno.siaoz.si/install.sh -o "$installer"
   bash "$installer"
 )
 ```
@@ -128,7 +128,7 @@ Zeno 适合希望自己掌控数据、只需要轻量监控与公开状态页的
   set -Eeuo pipefail
   installer=$(mktemp)
   trap 'rm -f "$installer"' EXIT
-  curl -fsSL https://zeno.shuijiao.de/install.sh -o "$installer"
+  curl -fsSL https://zeno.siaoz.si/install.sh -o "$installer"
   env \
     ZENO_INSTALL_DIR=/opt/zeno \
     ZENO_HOST_PORT=18980 \
@@ -146,8 +146,8 @@ Zeno 适合希望自己掌控数据、只需要轻量监控与公开状态页的
 
 ```bash
 version=vX.Y.Z
-curl -fsS "https://zeno.shuijiao.de/$version/install.sh" -o install.sh
-curl -fsS "https://zeno.shuijiao.de/$version/install.sh.sha256" -o install.sh.sha256
+curl -fsS "https://zeno.siaoz.si/$version/install.sh" -o install.sh
+curl -fsS "https://zeno.siaoz.si/$version/install.sh.sha256" -o install.sh.sha256
 sha256sum -c install.sh.sha256
 sudo env ZENO_IMAGE="ghcr.io/shui1iao/zeno:$version" bash install.sh
 rm -f install.sh install.sh.sha256

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { axisTicksForTimestamps, clampAxisTickX, pruneCollidingAxisTicks } from './LatencyChart'
 
-// Exact geometry captured from https://shuijiao.li/server/datawave-hk at a
+// Exact geometry captured from https://siaoz.com/server/datawave-hk at a
 // 1440px viewport: viewBox 960x320, 14 axis ticks, real rendered char width
 // 6.904px at 12px font. This is the case 水饺 reported as overlapping.
 const PROD = [

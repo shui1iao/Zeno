@@ -251,11 +251,11 @@ describe('requestAdminNodeInstallCommand', () => {
   it('requests an install command from the node edit context without putting the admin token in the URL', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       node_id: 'example-node-a',
-      command: "ZENO_INSTALL_URL='https://zeno.shuijiao.de/agent/install.sh' ZENO_CONTROLLER_URL='https://probe.example.com' ZENO_NODE_ID='example-node-a' bash -o pipefail -c 'curl -fsSL \"$ZENO_INSTALL_URL\" | sudo env ZENO_CONTROLLER_URL=\"$ZENO_CONTROLLER_URL\" ZENO_NODE_ID=\"$ZENO_NODE_ID\" bash'",
+      command: "ZENO_INSTALL_URL='https://zeno.siaoz.si/agent/install.sh' ZENO_CONTROLLER_URL='https://probe.example.com' ZENO_NODE_ID='example-node-a' bash -o pipefail -c 'curl -fsSL \"$ZENO_INSTALL_URL\" | sudo env ZENO_CONTROLLER_URL=\"$ZENO_CONTROLLER_URL\" ZENO_NODE_ID=\"$ZENO_NODE_ID\" bash'",
       commands: {
-        linux: "ZENO_INSTALL_URL='https://zeno.shuijiao.de/agent/install.sh' ZENO_CONTROLLER_URL='https://probe.example.com' ZENO_NODE_ID='example-node-a' bash -o pipefail -c 'curl -fsSL \"$ZENO_INSTALL_URL\" | sudo env ZENO_CONTROLLER_URL=\"$ZENO_CONTROLLER_URL\" ZENO_NODE_ID=\"$ZENO_NODE_ID\" bash'",
-        macos: "ZENO_INSTALL_URL='https://zeno.shuijiao.de/agent/install.sh' ZENO_CONTROLLER_URL='https://probe.example.com' ZENO_NODE_ID='example-node-a' bash -o pipefail -c 'curl -fsSL \"$ZENO_INSTALL_URL\" | sudo env ZENO_CONTROLLER_URL=\"$ZENO_CONTROLLER_URL\" ZENO_NODE_ID=\"$ZENO_NODE_ID\" bash'",
-        windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$env:ZENO_CONTROLLER_URL='https://probe.example.com'; irm 'https://zeno.shuijiao.de/agent/install.ps1' | iex\"",
+        linux: "ZENO_INSTALL_URL='https://zeno.siaoz.si/agent/install.sh' ZENO_CONTROLLER_URL='https://probe.example.com' ZENO_NODE_ID='example-node-a' bash -o pipefail -c 'curl -fsSL \"$ZENO_INSTALL_URL\" | sudo env ZENO_CONTROLLER_URL=\"$ZENO_CONTROLLER_URL\" ZENO_NODE_ID=\"$ZENO_NODE_ID\" bash'",
+        macos: "ZENO_INSTALL_URL='https://zeno.siaoz.si/agent/install.sh' ZENO_CONTROLLER_URL='https://probe.example.com' ZENO_NODE_ID='example-node-a' bash -o pipefail -c 'curl -fsSL \"$ZENO_INSTALL_URL\" | sudo env ZENO_CONTROLLER_URL=\"$ZENO_CONTROLLER_URL\" ZENO_NODE_ID=\"$ZENO_NODE_ID\" bash'",
+        windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$env:ZENO_CONTROLLER_URL='https://probe.example.com'; irm 'https://zeno.siaoz.si/agent/install.ps1' | iex\"",
       },
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     globalThis.fetch = fetchMock as unknown as typeof fetch
@@ -263,9 +263,9 @@ describe('requestAdminNodeInstallCommand', () => {
     const result = await requestAdminNodeInstallCommand('admin-pass', 'example-node-a', 'https://probe.example.com')
 
     expect(result.nodeId).toBe('example-node-a')
-    expect(result.command).toContain('zeno.shuijiao.de/agent/install.sh')
+    expect(result.command).toContain('zeno.siaoz.si/agent/install.sh')
     expect(result.command).toContain('bash -o pipefail')
-    expect(result.commands.windows).toContain('zeno.shuijiao.de/agent/install.ps1')
+    expect(result.commands.windows).toContain('zeno.siaoz.si/agent/install.ps1')
     expect(fetchMock).toHaveBeenCalledWith('/api/admin/v1/nodes/example-node-a/install-command', {
       method: 'POST',
       headers: {

@@ -22,8 +22,8 @@ Zeno Controller 推荐并支持通过仓库一键安装器管理 Docker Compose 
 
 ```bash
 version=vX.Y.Z
-curl -fsS "https://zeno.shuijiao.de/$version/install.sh" -o install.sh
-curl -fsS "https://zeno.shuijiao.de/$version/install.sh.sha256" -o install.sh.sha256
+curl -fsS "https://zeno.siaoz.si/$version/install.sh" -o install.sh
+curl -fsS "https://zeno.siaoz.si/$version/install.sh.sha256" -o install.sh.sha256
 sha256sum -c install.sh.sha256
 sudo env ZENO_IMAGE="ghcr.io/shui1iao/zeno:$version" ZENO_DB_CHECK_TIMEOUT=10m bash install.sh
 rm -f install.sh install.sh.sha256
@@ -74,11 +74,11 @@ Agent 安装器和多平台 release 来自独立 Zeno-Agent 仓库；公开安�
 
 ## 5. 安装器版本与校验边界
 
-默认 `https://zeno.shuijiao.de/install.sh` 是发布方维护的便利入口，适合解析当前推荐稳定版本。可复现升级应使用第一方不可变版本路由：
+默认 `https://zeno.siaoz.si/install.sh` 是发布方维护的便利入口，适合解析当前推荐稳定版本。可复现升级应使用第一方不可变版本路由：
 
 ```text
-https://zeno.shuijiao.de/vX.Y.Z/install.sh
-https://zeno.shuijiao.de/vX.Y.Z/install.sh.sha256
+https://zeno.siaoz.si/vX.Y.Z/install.sh
+https://zeno.siaoz.si/vX.Y.Z/install.sh.sha256
 ```
 
 该路由仅接受严格稳定 SemVer，并为脚本提供独立 SHA-256 元数据。先下载脚本和 checksum、运行 `sha256sum -c`，再以 root 执行；同时用同一版本固定 `ZENO_IMAGE=ghcr.io/shui1iao/zeno:vX.Y.Z`。默认入口继续用于便利安装，但不要把它当作明确回滚目标。仓库 tag 的 raw URL 仍可用于源码审计。
