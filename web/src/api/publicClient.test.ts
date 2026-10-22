@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchNodeLatency, fetchNodeState, fetchServiceLatency, nodeLatencySnapshotKey, normalizeSettings, normalizeNodeLatency, normalizeNodeState, normalizeServiceLatency, normalizeSummary, peekPrefetchedNodeLatency, peekPrefetchedNodeState, prefetchNodeLatency, prefetchNodeState } from './client'
+import { fetchNodeLatency, fetchNodeState, nodeLatencySnapshotKey, normalizeSettings, normalizeNodeLatency, normalizeNodeState, normalizeSummary, peekPrefetchedNodeLatency, peekPrefetchedNodeState, prefetchNodeLatency, prefetchNodeState } from './client'
 import { clearStoredAdminToken, loadStoredAdminToken, rememberAdminToken } from '../lib/adminToken'
 
 describe('normalizeSummary', () => {
@@ -122,91 +122,6 @@ describe('normalizeSummary', () => {
     expect(summary.services).toEqual([])
     expect(summary.latencyPoints).toEqual([])
     expect(summary.exchangeRates).toEqual({ CNY: 1 })
-  })
-})
-
-describe('normalizeServiceLatency', () => {
-  it('maps service latency points into chart-compatible node series', () => {
-    const data = normalizeServiceLatency({
-      target: { id: 'google', name: 'Google', type: 'http_get', assigned_node_count: 10, reporting_node_count: 9, median_ms: 1.2, loss_percent: 0, updated_at: '2026-07-02T12:00:00Z' },
-      range: '1d',
-      points: [
-        { ts: '2026-07-02T12:00:00Z', node_id: 'example-node-a', node_name: 'Example Node A', median_ms: 1.4, loss_percent: 0 },
-      ],
-    })
-
-    expect(data.target.id).toBe('google')
-    expect(data.target.assignedNodeCount).toBe(10)
-    expect(data.points[0].targetId).toBe('example-node-a')
-    expect(data.points[0].targetName).toBe('Example Node A')
-  })
-
-  it('expands compact Kulin-style node series into chart-compatible points', () => {
-    const data = normalizeServiceLatency({
-      target: { id: 'google', name: 'Google', type: 'http_get', assigned_node_count: 10, reporting_node_count: 9, median_ms: 1.2, loss_percent: 0, updated_at: '2026-07-02T12:00:00Z' },
-      range: '1d',
-      series: [
-        {
-          node_id: 'example-node-a',
-          node_name: 'Example Node A',
-          created_at: [Date.parse('2026-07-02T12:00:00Z')],
-          median_ms: [1.3],
-          avg_ms: [1.5],
-          loss_percent: [0],
-        },
-      ],
-    })
-
-    expect(data.points).toEqual([
-      expect.objectContaining({ ts: '2026-07-02T12:00:00.000Z', targetId: 'example-node-a', targetName: 'Example Node A', medianMs: 1.3, avgMs: 1.5, lossPercent: 0 }),
-    ])
-  })
-
-  it('expands service latency series with shared timestamps', () => {
-    const data = normalizeServiceLatency({
-      target: { id: 'google', name: 'Google', type: 'http_get', assigned_node_count: 10, reporting_node_count: 9, median_ms: 1.2, loss_percent: 0, updated_at: '2026-07-02T12:00:00Z' },
-      range: '1d',
-      created_at: [Date.parse('2026-07-02T12:00:00Z'), Date.parse('2026-07-02T12:01:00Z')],
-      series: [
-        {
-          node_id: 'example-node-a',
-          node_name: 'Example Node A',
-          avg_ms: [1.5, 2.5],
-          loss_percent: [0, 1],
-        },
-      ],
-    })
-
-    expect(data.points).toEqual([
-      expect.objectContaining({ ts: '2026-07-02T12:00:00.000Z', targetId: 'example-node-a', targetName: 'Example Node A', avgMs: 1.5, lossPercent: 0 }),
-      expect.objectContaining({ ts: '2026-07-02T12:01:00.000Z', targetId: 'example-node-a', targetName: 'Example Node A', avgMs: 2.5, lossPercent: 1 }),
-    ])
-  })
-})
-
-describe('fetchServiceLatency', () => {
-  const originalFetch = globalThis.fetch
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch
-    vi.restoreAllMocks()
-  })
-
-  it('fetches public service latency without admin credentials', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
-      target: { id: 'google', name: 'Google', type: 'http_get', address: 'https://www.google.com/generate_204', port: null, assigned_node_count: 10, reporting_node_count: 9, median_ms: 1.2, loss_percent: 0 },
-      range: '7d',
-      points: [],
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-    globalThis.fetch = fetchMock as unknown as typeof fetch
-
-    const data = await fetchServiceLatency('google', '7d')
-
-    expect(data.target.name).toBe('Google')
-    expect(data.range).toBe('7d')
-    expect(fetchMock).toHaveBeenCalledWith('/api/public/v1/services/google/latency?range=7d', {
-      headers: { Accept: 'application/json' },
-    })
   })
 })
 

@@ -127,12 +127,15 @@
 .detail-fact-strip--server .detail-fact:nth-child(n + 3) {
   border-top: 1px solid var(--divider);
 }
-.detail-fact p { margin: 0; color: var(--muted); font-size: 9.5px; font-weight: 500; }
+.detail-fact p { margin: 0; color: var(--muted); font-size: 11px; font-weight: 500; }
 .detail-fact strong { min-width: 0; overflow-wrap: anywhere; color: var(--foreground); font-size: 11px; line-height: 1.18; font-weight: 500; }
 .detail-fact:not(.is-wide) { min-height: 38px; }
 .detail-fact:not(.is-wide) strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
-.detail-fact.is-wide p { font-size: 10.5px; }
 .detail-fact.is-wide strong { font-size: 13px; line-height: 1.22; }
+.detail-fact-strip--service .detail-fact strong { font-size: 13px; }
+/* Values wrap between chunks, never inside one ("2 Virtual Cores", "1.95 GB", a load triple). */
+.detail-fact-chunk { white-space: nowrap; }
+.detail-fact-chunk.is-long { white-space: normal; }
 .detail-fact.is-pending strong { color: color-mix(in srgb, var(--foreground) 48%, transparent); }
 .detail-traffic-values { display: flex; flex-wrap: wrap; align-items: center; column-gap: 18px; row-gap: 3px; }
 .detail-traffic-value { display: inline-flex; flex: none; align-items: center; gap: 5px; min-width: 0; }
@@ -140,45 +143,6 @@
 .detail-range-row {
   grid-template-columns: repeat(var(--slider-columns), minmax(42px, 1fr));
 }
-.peak-switch {
-  --selector-height: 30px;
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: calc(var(--selector-height) + var(--selector-border-width) + var(--selector-border-width));
-  padding: 0 9px;
-  overflow: hidden;
-  border: var(--selector-border-width) solid var(--border);
-  border-radius: var(--selector-radius);
-  background: transparent;
-  color: color-mix(in srgb, var(--foreground) 70%, transparent);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  -webkit-appearance: none;
-  appearance: none;
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
-}
-.peak-switch:hover { color: var(--blue); transform: none; }
-.peak-switch:active { background: transparent; transform: none; }
-.peak-switch span {
-  width: 12px;
-  height: 12px;
-  flex: none;
-  border: 1px solid currentColor;
-  border-radius: var(--radius-pill);
-  background: transparent;
-}
-.peak-switch.is-active { border-color: var(--blue); background: var(--blue); color: #fff; }
-.peak-switch.is-active:hover,
-.peak-switch.is-active:active { background: var(--blue); color: #fff; }
-.peak-switch.is-active span { border-color: #fff; background: #fff; box-shadow: inset 0 0 0 3px var(--blue); }
-.peak-switch:focus-visible { outline: none; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 52%, transparent); }
-.peak-switch b { font-weight: 500; }
 
 .monitor-panel {
   position: relative;
@@ -202,7 +166,6 @@
   flex-wrap: wrap;
   gap: 10px;
 }
-.monitor-title-row .peak-switch { margin-left: 0; }
 .monitor-heading h3 { margin: 0; color: var(--foreground); font-size: 20px; font-weight: 500; }
 .latency-monitor-heading .monitor-title-row h3 { font-weight: 600; }
 .monitor-heading p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
@@ -213,7 +176,10 @@
   margin-left: auto;
 }
 .monitor-heading-actions .detail-range-row { margin: 0; }
-.monitor-heading-actions .peak-switch { margin-left: 0; }
+.monitor-title-row .smoothing-selector { width: auto; margin: 0; }
+/* Two-option “原始 / 平滑” switch: compact slider at its natural width. */
+.smoothing-selector { flex: none; width: auto; margin: 0; }
+
 .detail-state {
   margin: 0 24px 24px;
   padding: 18px 0;
@@ -254,7 +220,7 @@
   .detail-hero__badges { flex: none; justify-content: flex-end; margin-left: auto; }
   .detail-title-button { flex: 1 1 auto; width: auto; font-size: 19px; }
   .detail-status-pill { min-height: 22px; padding: 0 8px; font-size: 11px; }
-  .detail-fact-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+  .detail-fact-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; }
   .detail-fact-strip--service { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .detail-fact {
     min-width: 0;
@@ -269,21 +235,19 @@
   .detail-fact-strip--service .detail-fact:nth-child(n + 3) {
     border-top: 1px solid var(--divider);
   }
-  .detail-fact-strip--server .detail-fact:nth-child(n + 4):nth-child(3n + 1),
-  .detail-fact-strip--server .detail-fact:nth-child(n + 4):nth-child(3n + 2),
+  .detail-fact-strip--server .detail-fact:nth-child(n + 4):nth-child(2n),
   .detail-fact-strip--service .detail-fact:nth-child(2n) {
     border-left: 1px solid var(--divider);
   }
   .detail-fact-strip--server .detail-fact:nth-child(2),
-  .detail-fact-strip--server .detail-fact:nth-child(3),
-  .detail-fact-strip--server .detail-fact:nth-child(6),
+  .detail-fact-strip--server .detail-fact:nth-child(2n + 3),
   .detail-fact-strip--service .detail-fact:nth-child(3) {
     border-left: 0;
   }
-  .detail-fact p { flex: none; font-size: 10px; }
+  .detail-fact p { flex: none; font-size: 10.5px; }
   .detail-fact strong { min-width: 0; font-size: 11.5px; line-height: 1.22; }
   .detail-fact:not(.is-wide) { justify-content: flex-start; }
-  .detail-fact.is-adaptive > strong { width: 100%; flex: 1 1 auto; display: flex; align-items: center; }
+  .detail-fact.is-adaptive > strong { width: 100%; flex: 1 1 auto; display: flex; align-items: flex-start; }
   .detail-fact.is-adaptive.is-multiline > strong { align-items: flex-start; }
   .detail-fact.is-adaptive > strong > span { min-width: 0; }
   .detail-fact:not(.is-wide) strong { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
@@ -295,6 +259,4 @@
   .monitor-heading-actions .detail-range-row { width: auto; flex-wrap: nowrap; justify-content: flex-end; }
   .detail-range-row { grid-template-columns: repeat(var(--slider-columns), minmax(38px, 1fr)); }
   .detail-range-row > button { min-width: 0; padding: 0 7px; font-size: 10.5px; }
-  .peak-switch { --selector-height: 24px; padding: 0 7px; font-size: 10.5px; }
-  .peak-switch span { width: 10px; height: 10px; }
 }

@@ -1,6 +1,6 @@
 import { type MouseEvent, type ReactNode, useMemo, useState } from 'react'
 import type { StatePoint } from '../types'
-import { formatBps, formatBytes, formatPercent } from '../lib/format'
+import { formatBps, formatBytes, formatClock, formatPercent, formatTooltipDateTime, missingValue } from '../lib/format'
 import { availableHistoryRanges } from '../lib/historyRange'
 import { HistoryRangeSelector } from './HistoryRangeSelector'
 import { OverlaySurface } from './OverlaySurface'
@@ -36,6 +36,8 @@ interface MetricConfig {
 
 const plotWidth = 640
 const plotHeight = 112
+// Grid lines from top to bottom; the y-axis renders exactly one label for each.
+const gridRatios = [0, 0.5, 1] as const
 export function StateHistoryPanel({ points, range, loading = false, error, canUseExtendedRanges = false, onRangeChange = () => {} }: StateHistoryPanelProps) {
   const stateRangeOptions = availableHistoryRanges(canUseExtendedRanges)
   const chartPoints = useMemo(() => downsampleStatePoints(points, range), [points, range])
@@ -165,7 +167,7 @@ export function StateHistoryPanel({ points, range, loading = false, error, canUs
 }
 
 function ResourceMetricCard({ metric, timestamps }: { metric: MetricConfig; timestamps: number[] }) {
-  const domain = stateYDomain(metric.lines.flatMap((line) => line.values), metric.domainMax)
+  const domain = stateYDomain(metric.lines.flatMap((line) => line.values), metric.domainMax, metric.unitLabel === 'count')
   const yTicks = yAxisTicks(domain, metric.unitLabel)
   const timeTicks = stateAxisTicks(timestamps)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
@@ -187,20 +189,22 @@ function ResourceMetricCard({ metric, timestamps }: { metric: MetricConfig; time
           <p className="resource-card-title">{metric.label}</p>
           {metric.lines.length > 1 && (
             <span className="resource-chart-legend">
-              {metric.lines.map((line) => <em key={line.key} style={{ color: line.color }}>{line.label}</em>)}
+              {metric.lines.map((line) => <em key={line.key}><i style={{ backgroundColor: line.color }} aria-hidden="true" />{line.label}</em>)}
             </span>
           )}
         </div>
         <strong className={`resource-card-value${metric.compactValue ? ' is-compact' : ''}`}>{metric.value}</strong>
       </header>
 
-      <div className="resource-chart-frame">
+      <div className={`resource-chart-frame${metric.unitLabel === 'B/s' ? ' has-rate-axis' : ''}`}>
         <div className="resource-y-axis" aria-hidden="true">
-          {yTicks.map((tick) => <span key={tick}>{tick}</span>)}
+          {/* One label per grid line (top, middle, bottom). Labels can repeat
+              (e.g. an all-zero series), so they are keyed by position. */}
+          {yTicks.map((tick, index) => <span key={gridRatios[index]}>{tick}</span>)}
         </div>
         <div className="resource-chart-plot" onMouseMove={updateHover} onMouseLeave={() => setHoverIndex(null)}>
           <svg className="resource-chart-svg" viewBox={`0 0 ${plotWidth} ${plotHeight}`} preserveAspectRatio="none" role="img" aria-label={`${metric.label} history`}>
-            {[0, 0.5, 1].map((ratio) => (
+            {gridRatios.map((ratio) => (
               <line key={ratio} x1={0} x2={plotWidth} y1={ratio * plotHeight} y2={ratio * plotHeight} className="resource-grid-line" vectorEffect="non-scaling-stroke" />
             ))}
             {metric.fillArea && metric.lines.map((line) => (
@@ -348,12 +352,12 @@ function latestResourceUsage(
     const total = finiteOrNull(readTotal(points[index]))
     if (used !== null || total !== null) return formatResourceUsage(used, total)
   }
-  return 'No data'
+  return missingValue
 }
 
 export function formatResourceUsage(used: number | null | undefined, total: number | null | undefined): string {
   const pair = formatResourceValue(used, total)
-  if (pair === 'No data') return pair
+  if (pair === missingValue) return pair
   const percent = ratioPercent(used, total)
   return percent === null ? pair : `${pair} · ${formatPercent(percent)}`
 }
@@ -361,7 +365,7 @@ export function formatResourceUsage(used: number | null | undefined, total: numb
 function formatResourceValue(used: number | null | undefined, total: number | null | undefined): string {
   const safeUsed = finiteOrNull(used)
   const safeTotal = finiteOrNull(total)
-  if (safeUsed === null && safeTotal === null) return 'No data'
+  if (safeUsed === null && safeTotal === null) return missingValue
   return `${safeUsed === null ? '--' : formatBytes(safeUsed)} / ${safeTotal === null ? '--' : formatBytes(safeTotal)}`
 }
 
@@ -388,13 +392,16 @@ function finiteOrNull(value: number | null | undefined): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-export function stateYDomain(values: Array<number | null>, forcedMax?: number): { min: number; max: number } {
+export function stateYDomain(values: Array<number | null>, forcedMax?: number, integerTicks = false): { min: number; max: number } {
   let max = Number.NEGATIVE_INFINITY
   for (const value of values) {
     if (typeof value === 'number' && Number.isFinite(value) && value > max) max = value
   }
-  if (!Number.isFinite(max)) return { min: 0, max: forcedMax ?? 1 }
-  return { min: 0, max: Math.max(1, forcedMax ?? Math.ceil(max * 1.15)) }
+  const rawMax = !Number.isFinite(max) ? (forcedMax ?? 1) : Math.max(1, forcedMax ?? Math.ceil(max * 1.15))
+  // Count axes label the midpoint too; keep it an integer so that every label
+  // is distinct and sits exactly on its grid line (e.g. 0 / 1 / 2, not 0 / 1 / 1).
+  if (integerTicks && forcedMax === undefined) return { min: 0, max: Math.max(2, Math.ceil(rawMax / 2) * 2) }
+  return { min: 0, max: rawMax }
 }
 
 function chartLinePath(values: Array<number | null>, domain: { min: number; max: number }): string {
@@ -454,8 +461,8 @@ function chartX(index: number, count: number): number {
   return (index / (count - 1)) * plotWidth
 }
 
-function yAxisTicks(domain: { min: number; max: number }, unitLabel: string): string[] {
-  return [domain.max, domain.min + (domain.max - domain.min) / 2, domain.min].map((value) => formatAxisValue(value, unitLabel))
+export function yAxisTicks(domain: { min: number; max: number }, unitLabel: string): string[] {
+  return gridRatios.map((ratio) => formatAxisValue(domain.max - ratio * (domain.max - domain.min), unitLabel))
 }
 
 interface StateAxisTick {
@@ -481,29 +488,25 @@ function formatStateAxisTime(timestamp: number, timestamps: number[]): string {
   const start = valid[0] ?? timestamp
   const end = valid.at(-1) ?? timestamp
   const spanHours = (end - start) / 3_600_000
-  const time = date.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit' })
-  if (spanHours > 12) {
-    const day = date.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
-    return `${day} ${time}`
-  }
+  const time = formatClock(date)
+  if (spanHours > 12) return `${date.getMonth() + 1}/${date.getDate()} ${time}`
   return time
 }
 
 function formatAxisValue(value: number, unitLabel: string): string {
   if (unitLabel === '%') return `${Math.round(value)}%`
   if (unitLabel === 'count') return `${Math.round(value)}`
-  return value >= 1024 ? formatBps(value).replace('/s', '') : `${Math.round(value)} ${unitLabel}`
+  if (value <= 0) return `0 ${unitLabel}`
+  return value >= 1024 ? formatBps(value) : `${Math.round(value)} ${unitLabel}`
 }
 
 function formatTooltipValue(value: number | null | undefined, unitLabel: string): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '--'
+  if (value === null || value === undefined || !Number.isFinite(value)) return missingValue
   if (unitLabel === '%') return `${value.toFixed(1)}%`
   if (unitLabel === 'count') return `${Math.round(value)}`
   return formatBps(value)
 }
 
 function formatTooltipTime(timestamp: number): string {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return '--'
-  return date.toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return formatTooltipDateTime(timestamp)
 }

@@ -13,7 +13,7 @@ describe('admin auth client', () => {
   })
 
   it('coalesces the homepage and dashboard cookie probes and remembers their result', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ account: { username: 'admin' } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ authenticated: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
     await expect(Promise.all([probeAdminCookieSession(), probeAdminCookieSession()])).resolves.toEqual([true, true])

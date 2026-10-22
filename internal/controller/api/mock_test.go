@@ -204,36 +204,6 @@ func mockServiceTargets() []ServiceTarget {
 	}
 }
 
-func mockServiceLatencyPoints(targetID string, rangeNames ...string) []ServiceLatencyPoint {
-	window, ok := resolveLatencyWindow("")
-	if len(rangeNames) > 0 {
-		if gridWindow, gridOK := resolveLatencyGridWindow(rangeNames[0]); gridOK {
-			window, ok = gridWindow, true
-		} else {
-			window, ok = resolveLatencyWindow(rangeNames[0])
-		}
-	}
-	if !ok {
-		window, _ = resolveLatencyWindow("")
-	}
-	end := time.Date(2026, 7, 2, 13, 30, 0, 0, time.UTC)
-	nodes := mockNodes()
-	points := make([]ServiceLatencyPoint, 0, window.Samples*len(nodes))
-	for index := 0; index < window.Samples; index++ {
-		ts := end.Add(-time.Duration(window.Samples-1-index) * window.Step).Format(time.RFC3339)
-		for nodeIndex, node := range nodes {
-			base := 20 + float64(nodeIndex*8)
-			if targetID == "telegram-dc5" {
-				base += 15
-			}
-			median := base + float64((index+nodeIndex)%5)*1.7
-			loss := float64((index+nodeIndex)%4) * 0.05
-			points = append(points, ServiceLatencyPoint{TS: ts, NodeID: node.ID, NodeName: node.DisplayName, MedianMS: ptr(median), AvgMS: ptr(median), LossPercent: loss})
-		}
-	}
-	return points
-}
-
 func mockStatePoints(window latencyWindow) []StatePoint {
 	end := time.Date(2026, 7, 2, 13, 30, 0, 0, time.UTC)
 	points := make([]StatePoint, 0, window.Samples)

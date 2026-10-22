@@ -51,7 +51,6 @@ const requireChunk = (prefix) => {
 const chunks = {
   admin: requireChunk('AdminDashboard'),
   nodeDetail: requireChunk('NodeDetailRoute'),
-  serviceDetail: requireChunk('ServiceDetailRoute'),
 }
 for (const [sentinel, owner] of [
   ['账号只能使用 3-64 位', 'account'],
@@ -61,7 +60,7 @@ for (const [sentinel, owner] of [
     throw new Error(`${owner} module leaked into the public initial JavaScript graph`)
   }
 }
-for (const sentinel of ['同步监控服务…', '暂无服务延迟历史']) {
+for (const sentinel of ['同步监控服务…']) {
   if (initialJavaScript.includes(sentinel)) throw new Error(`detail module leaked into the public initial JavaScript graph: ${sentinel}`)
 }
 

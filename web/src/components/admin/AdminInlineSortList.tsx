@@ -307,14 +307,14 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
         {orderedItems.map((item) => {
           const isPlaceholder = dragState?.sourceId === item.id
           return (
-            <article
+            <div
               className={`admin-list-row admin-inline-sort-row${isPlaceholder ? ' is-placeholder' : ''}`}
               role="listitem"
               key={item.id}
               data-sort-item-id={item.id}
             >
               {renderRow(item, { dragHandle: createDragHandle(item) })}
-            </article>
+            </div>
           )
         })}
       </div>

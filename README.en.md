@@ -23,7 +23,7 @@ It is not a hosted SaaS and does not provide remote shells or command execution.
 - **Find network problems faster** — inspect latency, packet loss, and history with ICMP Ping, TCP Ping, and HTTP GET probes.
 - **Track what your servers cost** — record renewal amount, currency, and billing cycle, then normalize monthly spend with a daily cached exchange rate.
 - **Get notified when something breaks** — Telegram supports offline, resource-threshold, and test notifications scoped to selected servers.
-- **Share a responsive public status page** — server cards, overview metrics, node details, and service-latency details work on desktop and mobile.
+- **Share a responsive public status page** — server cards, overview metrics, and node details work on desktop and mobile.
 - **Stay lightweight and self-hosted** — the Controller uses SQLite; the official Compose file binds to `127.0.0.1:18980` by default and runs with a non-root user and a read-only root filesystem.
 
 ## Quick start

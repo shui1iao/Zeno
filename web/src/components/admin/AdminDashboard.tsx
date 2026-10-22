@@ -242,7 +242,7 @@ export function AdminDashboard({
               </label>
               <label>
                 <span>密码</span>
-                <input name="admin-password" type="password" autoComplete="current-password" placeholder="admin" aria-label="后台密码" />
+                <input name="admin-password" type="password" autoComplete="current-password" placeholder="请输入密码" aria-label="后台密码" />
               </label>
               <button type="submit" disabled={authState.kind === 'loading'}>{authState.kind === 'loading' ? '登录中…' : '登录后台'}</button>
               {authState.kind === 'error' && <p className="admin-login-error">{authState.message}</p>}

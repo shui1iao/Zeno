@@ -381,37 +381,6 @@ func (s *sqliteReadQueries) serviceTargets(ctx context.Context) ([]ServiceTarget
 	return targets, nil
 }
 
-func (s *sqliteReadQueries) serviceTargetByID(ctx context.Context, targetID string) (ServiceTarget, error) {
-	var target ServiceTarget
-	var assigned int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT pt.id, pt.name, pt.type,
-		       COUNT(DISTINCT CASE WHEN n.id IS NOT NULL AND COALESCE(npt.enabled, 0) = 1 AND n.disabled = 0 THEN n.id END) AS assigned_nodes
-		FROM probe_targets pt
-		LEFT JOIN node_probe_targets npt ON npt.target_id = pt.id
-		LEFT JOIN nodes n ON n.id = npt.node_id
-		WHERE pt.id = ?
-		  AND NOT EXISTS (
-			SELECT 1 FROM admin_deletion_jobs deletion
-			WHERE deletion.entity_kind = 'probe_target'
-			  AND deletion.entity_id = pt.id
-			  AND deletion.state IN ('pending', 'running')
-		  )
-		GROUP BY pt.id, pt.name, pt.type
-	`, targetID).Scan(&target.ID, &target.Name, &target.Type, &assigned)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return ServiceTarget{}, errProbeTargetNotFound
-		}
-		return ServiceTarget{}, err
-	}
-	target.AssignedNodeCount = assigned
-	if err := s.populateServiceTargetLatencySummary(ctx, &target); err != nil {
-		return ServiceTarget{}, err
-	}
-	return target, nil
-}
-
 func (s *sqliteReadQueries) populateServiceTargetLatencySummaries(ctx context.Context, targets []ServiceTarget) error {
 	if len(targets) == 0 {
 		return nil
@@ -482,74 +451,4 @@ func (s *sqliteReadQueries) populateServiceTargetLatencySummaries(ctx context.Co
 		}
 	}
 	return rows.Err()
-}
-
-func (s *sqliteReadQueries) populateServiceTargetLatencySummary(ctx context.Context, target *ServiceTarget) error {
-	since := time.Now().UTC().Add(-24 * time.Hour).Unix()
-	if err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(DISTINCT pr.node_id)
-		FROM probe_rounds pr
-		JOIN nodes n ON n.id = pr.node_id
-		LEFT JOIN node_probe_targets npt ON npt.node_id = pr.node_id AND npt.target_id = pr.target_id
-		WHERE pr.target_id = ?
-		  AND pr.ts >= ?
-		  AND n.disabled = 0
-		  AND COALESCE(npt.enabled, 0) = 1
-	`, target.ID, since).Scan(&target.ReportingNodeCount); err != nil {
-		return err
-	}
-	var median, avg sql.NullFloat64
-	var loss sql.NullFloat64
-	var ts sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
-		SELECT pr.median_ms, pr.avg_ms, pr.loss_percent, pr.ts
-		FROM probe_rounds pr
-		JOIN nodes n ON n.id = pr.node_id
-		LEFT JOIN node_probe_targets npt ON npt.node_id = pr.node_id AND npt.target_id = pr.target_id
-		WHERE pr.target_id = ?
-		  AND n.disabled = 0
-		  AND COALESCE(npt.enabled, 0) = 1
-		ORDER BY pr.ts DESC, pr.id DESC
-		LIMIT 1
-	`, target.ID).Scan(&median, &avg, &loss, &ts)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil
-		}
-		return err
-	}
-	target.MedianMS = floatPtr(median)
-	target.AvgMS = floatPtr(avg)
-	target.LossPercent = floatPtr(loss)
-	if ts.Valid {
-		target.UpdatedAt = time.Unix(ts.Int64, 0).UTC().Format(time.RFC3339)
-	}
-	return nil
-}
-
-func (s *sqliteReadQueries) serviceLatencyPoints(ctx context.Context, targetID string, window latencyWindow) ([]ServiceLatencyPoint, error) {
-	if useLatencyGrid(window) {
-		return s.latency.serviceLatencyGridPoints(ctx, targetID, window)
-	}
-	since := time.Now().UTC().Add(-time.Duration(window.Samples) * window.Step).Unix()
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT pr.ts, pr.node_id, n.display_name, pr.median_ms, pr.avg_ms, pr.loss_percent
-		FROM probe_rounds pr
-		JOIN nodes n ON n.id = pr.node_id
-		JOIN probe_targets pt ON pt.id = pr.target_id
-		LEFT JOIN node_probe_targets npt ON npt.node_id = pr.node_id AND npt.target_id = pr.target_id
-		WHERE pr.target_id = ?
-		  AND pr.ts >= ?
-		  AND n.disabled = 0
-		  AND COALESCE(npt.enabled, 0) = 1
-		ORDER BY pr.ts ASC, n.display_order ASC, n.display_name ASC, pr.id ASC
-	`, targetID, since)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	return scanLatencyRows(rows, []ServiceLatencyPoint{}, func(ts, nodeID, nodeName string, median, avg *float64, loss float64) ServiceLatencyPoint {
-		return ServiceLatencyPoint{TS: ts, NodeID: nodeID, NodeName: nodeName, MedianMS: median, AvgMS: avg, LossPercent: loss}
-	})
 }

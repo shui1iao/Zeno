@@ -841,26 +841,6 @@ func TestSQLiteBackedSummaryUsesPersistedNodeAndLatestLatency(t *testing.T) {
 	if len(summary.Services) != 1 || summary.Services[0].ID != "google" || summary.Services[0].ReportingNodeCount != 1 || summary.Services[0].AvgMS == nil || *summary.Services[0].AvgMS != 8.8 {
 		t.Fatalf("summary services = %+v, want persisted google service status", summary.Services)
 	}
-
-	serviceRecorder := httptest.NewRecorder()
-	handler.ServeHTTP(serviceRecorder, httptest.NewRequest(http.MethodGet, "/api/public/v1/services/google/latency?range=1h", nil))
-	if serviceRecorder.Code != http.StatusOK {
-		t.Fatalf("service status = %d, want 200; body=%s", serviceRecorder.Code, serviceRecorder.Body.String())
-	}
-	var serviceResponse ServiceTargetLatencyResponse
-	if err := json.NewDecoder(serviceRecorder.Body).Decode(&serviceResponse); err != nil {
-		t.Fatalf("decode service response: %v", err)
-	}
-	var servicePoint *ServiceLatencyPoint
-	for index := range serviceResponse.Points {
-		if serviceResponse.Points[index].NodeID == "example-node-a" && serviceResponse.Points[index].AvgMS != nil {
-			servicePoint = &serviceResponse.Points[index]
-			break
-		}
-	}
-	if serviceResponse.Target.ID != "google" || servicePoint == nil {
-		t.Fatalf("service response = %+v, want google points by node", serviceResponse)
-	}
 }
 
 func TestSQLiteBackedSummaryUsesConfiguredHomeLatencyTarget(t *testing.T) {

@@ -9,9 +9,9 @@ describe('renewal reminder options', () => {
   })
 
   it('labels the calendar-month option separately from day durations', () => {
-    expect(formatRenewalDayOption(1)).toBe('提前1天')
+    expect(formatRenewalDayOption(1)).toBe('提前 1 天')
     expect(formatRenewalDayOption(15)).toBe('提前半个月')
-    expect(formatRenewalDayOption(30)).toBe('提前1个月')
+    expect(formatRenewalDayOption(30)).toBe('提前 1 个月')
   })
 
   it('normalizes multiple reminder days without duplicates and keeps the legacy threshold fallback', () => {

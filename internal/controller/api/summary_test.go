@@ -325,7 +325,7 @@ func legacyServiceTargetsForTest(ctx context.Context, store *SQLiteStore) ([]Ser
 		return nil, err
 	}
 	for index := range targets {
-		if err := store.populateServiceTargetLatencySummary(ctx, &targets[index]); err != nil {
+		if err := store.legacyPopulateServiceTargetLatencySummary(ctx, &targets[index]); err != nil {
 			return nil, err
 		}
 	}
@@ -660,4 +660,49 @@ func namedValuesToValues(args []driver.NamedValue) []driver.Value {
 		values[index] = arg.Value
 	}
 	return values
+}
+
+// legacyPopulateServiceTargetLatencySummary is the former per-target query,
+// kept only as a test oracle for the batched summary query.
+func (s *sqliteReadQueries) legacyPopulateServiceTargetLatencySummary(ctx context.Context, target *ServiceTarget) error {
+	since := time.Now().UTC().Add(-24 * time.Hour).Unix()
+	if err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(DISTINCT pr.node_id)
+		FROM probe_rounds pr
+		JOIN nodes n ON n.id = pr.node_id
+		LEFT JOIN node_probe_targets npt ON npt.node_id = pr.node_id AND npt.target_id = pr.target_id
+		WHERE pr.target_id = ?
+		  AND pr.ts >= ?
+		  AND n.disabled = 0
+		  AND COALESCE(npt.enabled, 0) = 1
+	`, target.ID, since).Scan(&target.ReportingNodeCount); err != nil {
+		return err
+	}
+	var median, avg sql.NullFloat64
+	var loss sql.NullFloat64
+	var ts sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT pr.median_ms, pr.avg_ms, pr.loss_percent, pr.ts
+		FROM probe_rounds pr
+		JOIN nodes n ON n.id = pr.node_id
+		LEFT JOIN node_probe_targets npt ON npt.node_id = pr.node_id AND npt.target_id = pr.target_id
+		WHERE pr.target_id = ?
+		  AND n.disabled = 0
+		  AND COALESCE(npt.enabled, 0) = 1
+		ORDER BY pr.ts DESC, pr.id DESC
+		LIMIT 1
+	`, target.ID).Scan(&median, &avg, &loss, &ts)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return err
+	}
+	target.MedianMS = floatPtr(median)
+	target.AvgMS = floatPtr(avg)
+	target.LossPercent = floatPtr(loss)
+	if ts.Valid {
+		target.UpdatedAt = time.Unix(ts.Int64, 0).UTC().Format(time.RFC3339)
+	}
+	return nil
 }

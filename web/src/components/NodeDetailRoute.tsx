@@ -59,6 +59,7 @@ export function NodeDetailRoute({ node, summary, adminToken, expireAdminSession,
       onRangeChange={setNodeLatencyRange}
       onStateRangeChange={setStateRange}
       topHeader={topHeader}
+      targetOrder={summary?.services.map((service) => service.id)}
     />
   )
 }

@@ -222,7 +222,7 @@ export function AdminInstallCommand({ nodeId, initialMessage, blocked = false, o
         <div className="admin-install-copy-menu">
           <button
             ref={installCopyButtonRef}
-            className="admin-primary-action admin-install-copy-button"
+            className="admin-install-copy-button"
             type="button"
             aria-haspopup="menu"
             aria-expanded={installPlatformPickerVisible}

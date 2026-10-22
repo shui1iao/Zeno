@@ -15,7 +15,6 @@ func TestExtendedHistoryRequiresAdminToken(t *testing.T) {
 	paths := []string{
 		"/api/public/v1/nodes/example-node-a/latency?range=7d",
 		"/api/public/v1/nodes/example-node-a/state?range=30d",
-		"/api/public/v1/services/google/latency?range=7d",
 	}
 	for _, path := range paths {
 		recorder := httptest.NewRecorder()

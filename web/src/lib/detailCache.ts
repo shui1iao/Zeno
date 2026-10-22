@@ -6,14 +6,15 @@ export type CachedDetail<T> = {
 
 export const nodeLatencyCachePrefix = 'zeno_node_latency_cache_v1'
 export const nodeStateCachePrefix = 'zeno_node_state_cache_v1'
-export const serviceLatencyCachePrefix = 'zeno_service_latency_cache_v1'
 export const detailCacheFreshTtlMs = 30 * 1000
 export const detailCacheMaxAgeMs = 5 * 60 * 1000
 export const detailCacheMaxBytes = 700_000
 export const detailMemoryCacheMaxEntries = 12
 export const detailSessionCacheMaxEntries = 24
 
-const detailCachePrefixes = [nodeLatencyCachePrefix, nodeStateCachePrefix, serviceLatencyCachePrefix] as const
+// The retired zeno_service_latency_cache_v1 entries are still recognised so old
+// session data from the removed single-target page is pruned with the rest.
+const detailCachePrefixes = [nodeLatencyCachePrefix, nodeStateCachePrefix, 'zeno_service_latency_cache_v1'] as const
 
 type StoredDetailEnvelope = {
   storedAt: number

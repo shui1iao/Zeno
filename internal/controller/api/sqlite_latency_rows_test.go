@@ -32,20 +32,8 @@ func TestRawLatencyRowsPreserveDimensionAndEmptyShapes(t *testing.T) {
 		t.Fatalf("node points = %+v", nodePoints)
 	}
 
-	servicePoints, err := store.serviceLatencyPoints(ctx, "target-a", window)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(servicePoints) != 1 || servicePoints[0].TS != now.Format(time.RFC3339) || servicePoints[0].NodeID != "node-a" || servicePoints[0].NodeName != "Node A" || servicePoints[0].MedianMS != nil || servicePoints[0].AvgMS == nil || *servicePoints[0].AvgMS != 12.5 || servicePoints[0].LossPercent != 2.5 {
-		t.Fatalf("service points = %+v", servicePoints)
-	}
-
 	emptyNodePoints, err := store.latencyPoints(ctx, "missing-node", window)
 	if err != nil || emptyNodePoints != nil {
 		t.Fatalf("empty node points = (%v, %v), want (nil, nil)", emptyNodePoints, err)
-	}
-	emptyServicePoints, err := store.serviceLatencyPoints(ctx, "missing-target", window)
-	if err != nil || emptyServicePoints == nil || len(emptyServicePoints) != 0 {
-		t.Fatalf("empty service points = (%v, %v), want (non-nil empty, nil)", emptyServicePoints, err)
 	}
 }

@@ -14,7 +14,6 @@ type Store interface {
 	Summary(ctx context.Context) (SummaryResponse, error)
 	PublicSettings(ctx context.Context) (SiteSettings, error)
 	NodeLatency(ctx context.Context, nodeID string, window latencyWindow) (LatencyResponse, error)
-	ServiceTargetLatency(ctx context.Context, targetID string, window latencyWindow) (ServiceTargetLatencyResponse, error)
 	NodeState(ctx context.Context, nodeID string, window latencyWindow) (StateResponse, error)
 }
 
@@ -33,9 +32,6 @@ func (unconfiguredStore) PublicSettings(context.Context) (SiteSettings, error) {
 }
 func (unconfiguredStore) NodeLatency(context.Context, string, latencyWindow) (LatencyResponse, error) {
 	return LatencyResponse{}, errStoreNotConfigured
-}
-func (unconfiguredStore) ServiceTargetLatency(context.Context, string, latencyWindow) (ServiceTargetLatencyResponse, error) {
-	return ServiceTargetLatencyResponse{}, errStoreNotConfigured
 }
 func (unconfiguredStore) NodeState(context.Context, string, latencyWindow) (StateResponse, error) {
 	return StateResponse{}, errStoreNotConfigured

@@ -24,7 +24,7 @@ export function AdminTargetWorkspace({ targets, nodes, onCreate, onUpdate, onReo
         }
       />
 
-      {targets.length === 0 && <div className="admin-state-card">还没有探针目标。</div>}
+      {targets.length === 0 && <div className="admin-state-card">还没有目标。</div>}
       {targets.length > 0 && <AdminTargetList targets={sortedTargets} onEdit={setEditingTargetId} onDelete={onDelete} onReorder={onReorder} />}
 
       {creatingTarget && (
@@ -87,9 +87,9 @@ function AdminTargetList({ targets, onEdit, onDelete, onReorder }: { targets: Ad
       />
       {pendingDelete && (
         <AdminDeleteConfirmModal
-          title="删除延迟监控"
+          title="删除目标"
           subjectName={pendingDelete.name}
-          confirmLabel="删除延迟监控"
+          confirmLabel="删除目标"
           onClose={() => setPendingDelete(null)}
           onConfirm={() => onDelete(pendingDelete.id)}
         />
@@ -131,55 +131,57 @@ function AdminTargetCreateModal({ nodes, onCreate, onClose }: { nodes: AdminNode
   }
 
   return (
-    <AdminModal title="添加延迟监控目标" closeDisabled={submitting} onClose={onClose}>
-      <form className="admin-target-create-form admin-node-edit-form is-sectioned" aria-label="添加探针目标" aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
-        <AdminFormSection title="目标信息">
-          <div className="admin-form-grid">
-            <label>
-              <span>目标名称</span>
-              <input name="new-target-name" autoComplete="off" placeholder="Example HTTPS" />
-            </label>
-            <AdminSegmentedField name="new-target-type" label="类型" value={targetType} onChange={(value) => setTargetType(normalizeTargetFormType(value))} options={targetTypeOptions} />
-            <label>
-              <span>地址</span>
-              <input name="new-target-address" autoComplete="off" placeholder="example.com" />
-            </label>
-            {targetType === 'tcping' && (
+    <AdminModal title="添加目标" closeDisabled={submitting} onClose={onClose}>
+      <form className="admin-target-create-form admin-node-edit-form is-sectioned" aria-label="添加目标" aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
+        <div className="admin-modal-scroll">
+          <AdminFormSection title="目标信息">
+            <div className="admin-form-grid">
               <label>
-                <span>端口</span>
-                <input name="new-target-port" type="number" min="1" max="65535" defaultValue="443" />
+                <span>目标名称</span>
+                <input name="new-target-name" autoComplete="off" placeholder="Example HTTPS" />
               </label>
-            )}
-          </div>
-        </AdminFormSection>
-        {nodes.length > 0 && (
-          <AdminFormSection title="启用服务器">
-            <AdminExpandedCheckList
-              title="已启用服务器"
-              panelLabel="选择服务器"
-              emptyText="暂无服务器"
-              options={nodes.map((node) => ({ value: node.id, label: node.displayName || node.id }))}
-              value={assignmentNodeIds}
-              onChange={setAssignmentNodeIds}
-            />
+              <AdminSegmentedField name="new-target-type" label="类型" value={targetType} onChange={(value) => setTargetType(normalizeTargetFormType(value))} options={targetTypeOptions} />
+              <label>
+                <span>地址</span>
+                <input name="new-target-address" autoComplete="off" placeholder="example.com" />
+              </label>
+              {targetType === 'tcping' && (
+                <label>
+                  <span>端口</span>
+                  <input name="new-target-port" type="number" min="1" max="65535" defaultValue="443" />
+                </label>
+              )}
+            </div>
           </AdminFormSection>
-        )}
-        <AdminFormSection title="探测参数">
-          <div className="admin-form-grid">
-            <label>
-              <span>次数</span>
-              <input name="new-target-count" type="number" min="1" defaultValue="3" />
-            </label>
-            <label>
-              <span>超时 ms</span>
-              <input name="new-target-timeout-ms" type="number" min="1" defaultValue="1000" />
-            </label>
-            <label>
-              <span>间隔 s</span>
-              <input name="new-target-interval-sec" type="number" min="1" defaultValue="30" />
-            </label>
-          </div>
-        </AdminFormSection>
+          <AdminFormSection title="探测参数">
+            <div className="admin-form-grid">
+              <label>
+                <span>次数</span>
+                <input name="new-target-count" type="number" min="1" defaultValue="3" />
+              </label>
+              <label>
+                <span>超时 ms</span>
+                <input name="new-target-timeout-ms" type="number" min="1" defaultValue="1000" />
+              </label>
+              <label>
+                <span>间隔 s</span>
+                <input name="new-target-interval-sec" type="number" min="1" defaultValue="30" />
+              </label>
+            </div>
+          </AdminFormSection>
+          {nodes.length > 0 && (
+            <AdminFormSection title="启用服务器">
+              <AdminExpandedCheckList
+                title="已启用服务器"
+                panelLabel="选择服务器"
+                emptyText="暂无服务器"
+                options={nodes.map((node) => ({ value: node.id, label: node.displayName || node.id }))}
+                value={assignmentNodeIds}
+                onChange={setAssignmentNodeIds}
+              />
+            </AdminFormSection>
+          )}
+        </div>
         <AdminActionFooter error={formError}>
           <button type="submit" disabled={submitting}>{submitting ? '添加中…' : '添加目标'}</button>
         </AdminActionFooter>
@@ -226,55 +228,57 @@ function AdminTargetEditModal({ target, nodes, onUpdate, onClose }: { target: Ad
   }
 
   return (
-    <AdminModal title="编辑延迟监控" closeDisabled={submitting} onClose={onClose}>
-      <form className="admin-target-edit-form admin-node-edit-form is-sectioned" aria-label={`${target.name} 探针目标编辑`} aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
-        <AdminFormSection title="目标信息">
-          <div className="admin-form-grid">
-            <label>
-              <span>目标名</span>
-              <input name="target-name" defaultValue={target.name} autoComplete="off" />
-            </label>
-            <AdminSegmentedField name="target-type" label="类型" value={targetType} onChange={(value) => setTargetType(normalizeTargetFormType(value))} options={targetTypeOptions} />
-            <label>
-              <span>地址</span>
-              <input name="target-address" defaultValue={target.address} autoComplete="off" />
-            </label>
-            {targetType === 'tcping' && (
+    <AdminModal title="编辑目标" closeDisabled={submitting} onClose={onClose}>
+      <form className="admin-target-edit-form admin-node-edit-form is-sectioned" aria-label={`编辑目标 ${target.name}`} aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
+        <div className="admin-modal-scroll">
+          <AdminFormSection title="目标信息">
+            <div className="admin-form-grid">
               <label>
-                <span>端口</span>
-                <input name="target-port" type="number" min="1" max="65535" defaultValue={target.port ?? ''} />
+                <span>目标名称</span>
+                <input name="target-name" defaultValue={target.name} autoComplete="off" />
               </label>
-            )}
-          </div>
-        </AdminFormSection>
-        <AdminFormSection title="探测参数">
-          <div className="admin-form-grid">
-            <label>
-              <span>次数</span>
-              <input name="target-count" type="number" min="1" defaultValue={target.count} />
-            </label>
-            <label>
-              <span>超时 ms</span>
-              <input name="target-timeout-ms" type="number" min="1" defaultValue={target.timeoutMs} />
-            </label>
-            <label>
-              <span>间隔 s</span>
-              <input name="target-interval-sec" type="number" min="1" defaultValue={target.intervalSec} />
-            </label>
-          </div>
-        </AdminFormSection>
-        {assignmentRows.length > 0 && (
-          <AdminFormSection title="按服务器启用">
-            <AdminExpandedCheckList
-              title="已启用服务器"
-              panelLabel="选择服务器"
-              emptyText="暂无服务器"
-              options={assignmentRows.map((assignment) => ({ value: assignment.nodeId, label: assignment.nodeDisplayName || assignment.nodeId }))}
-              value={assignmentNodeIds}
-              onChange={setAssignmentNodeIds}
-            />
+              <AdminSegmentedField name="target-type" label="类型" value={targetType} onChange={(value) => setTargetType(normalizeTargetFormType(value))} options={targetTypeOptions} />
+              <label>
+                <span>地址</span>
+                <input name="target-address" defaultValue={target.address} autoComplete="off" />
+              </label>
+              {targetType === 'tcping' && (
+                <label>
+                  <span>端口</span>
+                  <input name="target-port" type="number" min="1" max="65535" defaultValue={target.port ?? ''} />
+                </label>
+              )}
+            </div>
           </AdminFormSection>
-        )}
+          <AdminFormSection title="探测参数">
+            <div className="admin-form-grid">
+              <label>
+                <span>次数</span>
+                <input name="target-count" type="number" min="1" defaultValue={target.count} />
+              </label>
+              <label>
+                <span>超时 ms</span>
+                <input name="target-timeout-ms" type="number" min="1" defaultValue={target.timeoutMs} />
+              </label>
+              <label>
+                <span>间隔 s</span>
+                <input name="target-interval-sec" type="number" min="1" defaultValue={target.intervalSec} />
+              </label>
+            </div>
+          </AdminFormSection>
+          {assignmentRows.length > 0 && (
+            <AdminFormSection title="启用服务器">
+              <AdminExpandedCheckList
+                title="已启用服务器"
+                panelLabel="选择服务器"
+                emptyText="暂无服务器"
+                options={assignmentRows.map((assignment) => ({ value: assignment.nodeId, label: assignment.nodeDisplayName || assignment.nodeId }))}
+                value={assignmentNodeIds}
+                onChange={setAssignmentNodeIds}
+              />
+            </AdminFormSection>
+          )}
+        </div>
         <AdminActionFooter error={formError}>
           <button type="submit" disabled={submitting}>{submitting ? '保存中…' : '保存目标'}</button>
         </AdminActionFooter>

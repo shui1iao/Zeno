@@ -22,15 +22,6 @@ func (mockStore) NodeLatency(_ context.Context, nodeID string, window latencyWin
 	return LatencyResponse{NodeID: nodeID, Range: window.Name, Points: mockLatencyPoints(nodeID, window.Name)}, nil
 }
 
-func (mockStore) ServiceTargetLatency(_ context.Context, targetID string, window latencyWindow) (ServiceTargetLatencyResponse, error) {
-	for _, target := range mockServiceTargets() {
-		if target.ID == targetID {
-			return ServiceTargetLatencyResponse{Target: target, Range: window.Name, Points: mockServiceLatencyPoints(targetID, window.Name)}, nil
-		}
-	}
-	return ServiceTargetLatencyResponse{}, errProbeTargetNotFound
-}
-
 func (mockStore) NodeState(_ context.Context, nodeID string, window latencyWindow) (StateResponse, error) {
 	if !mockNodeExists(nodeID) {
 		return StateResponse{}, errNodeNotFound

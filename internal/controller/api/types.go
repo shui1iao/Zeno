@@ -13,12 +13,6 @@ type LatencyResponse struct {
 	Points []LatencyPoint `json:"points"`
 }
 
-type ServiceTargetLatencyResponse struct {
-	Target ServiceTarget         `json:"target"`
-	Range  string                `json:"range"`
-	Points []ServiceLatencyPoint `json:"points"`
-}
-
 type StateResponse struct {
 	NodeID string       `json:"node_id"`
 	Range  string       `json:"range"`
@@ -104,15 +98,6 @@ type ServiceTarget struct {
 	AvgMS              *float64 `json:"avg_ms"`
 	LossPercent        *float64 `json:"loss_percent"`
 	UpdatedAt          string   `json:"updated_at,omitempty"`
-}
-
-type ServiceLatencyPoint struct {
-	TS          string   `json:"ts"`
-	NodeID      string   `json:"node_id"`
-	NodeName    string   `json:"node_name"`
-	MedianMS    *float64 `json:"median_ms"`
-	AvgMS       *float64 `json:"avg_ms"`
-	LossPercent float64  `json:"loss_percent"`
 }
 
 type StatePoint struct {

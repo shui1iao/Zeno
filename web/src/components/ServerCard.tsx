@@ -23,6 +23,14 @@ const osAsset: Record<string, string> = {
   unknown: '/assets/logo/linux.svg',
 }
 
+function osKindFor(os: string | undefined): string {
+  const value = os?.trim().toLowerCase() ?? ''
+  for (const kind of ['windows', 'debian', 'ubuntu', 'centos', 'alpine', 'linux']) {
+    if (value.includes(kind)) return kind
+  }
+  return 'unknown'
+}
+
 function osAssetFor(os: string | undefined): string {
   const value = os?.trim().toLowerCase() ?? ''
   if (value.includes('windows')) return osAsset.windows
@@ -51,7 +59,7 @@ function barTone(value: number | null | undefined): 'good' | 'warning' | 'danger
   return 'good'
 }
 
-function formatKulinBytes(value: number | null | undefined, options: { compact?: boolean } = {}): string {
+function formatKulinBytes(value: number | null | undefined, options: { total?: boolean } = {}): string {
   if (value === null || value === undefined) return '--'
   if (value === 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
@@ -63,8 +71,9 @@ function formatKulinBytes(value: number | null | undefined, options: { compact?:
   }
   const signed = value < 0 ? -size : size
   const digits = unit === 0 ? 0 : 2
-  const joiner = options.compact ? '' : ' '
-  return `${signed.toFixed(digits)}${joiner}${units[unit]}`
+  const amount = signed.toFixed(digits)
+  // Configured totals (quota, memory, disk) are usually whole numbers: 50 TB, not 50.00 TB.
+  return `${options.total ? amount.replace(/\.00$/, '') : amount} ${units[unit]}`
 }
 
 function formatRate(value: number | null | undefined): string {
@@ -135,8 +144,16 @@ function historyTitle(kind: HistoryKind, point: HourlyLatencyPoint): string {
   const value = kind === 'latency' ? point.latencyMs : point.lossPercent
   const label = kind === 'latency' ? '延迟' : '丢包'
   const suffix = kind === 'latency' ? 'ms' : '%'
-  const separator = kind === 'latency' && value !== null && value !== undefined ? ' ' : ''
-  return `${historyTimestamp(point.startedAt)} · ${label} ${value === null || value === undefined ? '--' : value.toFixed(2)}${separator}${suffix}`
+  if (value === null || value === undefined) return `${historyTimestamp(point.startedAt)} · ${label} --`
+  const separator = kind === 'latency' ? ' ' : ''
+  return `${historyTimestamp(point.startedAt)} · ${label} ${value.toFixed(2)}${separator}${suffix}`
+}
+
+function historyStripSummary(kind: HistoryKind, label: string, points: HourlyLatencyPoint[]): string {
+  const values = points.map((point) => kind === 'latency' ? point.latencyMs : point.lossPercent)
+  const counts = { good: 0, warning: 0, danger: 0, empty: 0 }
+  values.forEach((value) => { counts[historyTone(kind, value)] += 1 })
+  return `${label}近 12 小时：正常 ${counts.good} 小时，偏高 ${counts.warning} 小时，严重 ${counts.danger} 小时，无数据 ${counts.empty} 小时`
 }
 
 function formatTrafficLabel(): string {
@@ -217,7 +234,7 @@ export function ServerCard({ node, serverCardTheme = 'classic', displayCurrency 
   useEffect(() => clearIntentTimer, [])
 
   return (
-    <article
+    <div
       className={`kulin-node-card${capsule ? ` is-capsule ${capsuleStatus}` : ''}${isOfflineCard ? ' is-offline' : ''}`}
       role={onOpen ? 'link' : undefined}
       tabIndex={onOpen ? 0 : undefined}
@@ -236,7 +253,7 @@ export function ServerCard({ node, serverCardTheme = 'classic', displayCurrency 
       }}
     >
       <section className="node-head">
-        <img alt={node.os || 'linux'} className="node-os" loading="lazy" src={osAssetFor(node.os)} />
+        <img alt={node.os || 'linux'} className="node-os" data-os={osKindFor(node.os)} loading="lazy" src={osAssetFor(node.os)} />
         <div className="node-title-line">
           <ServerFlag countryCode={node.countryCode} className="node-flag" />
           <p>{node.displayName}</p>
@@ -253,28 +270,28 @@ export function ServerCard({ node, serverCardTheme = 'classic', displayCurrency 
       {!capsule && (
         <section className="node-specs" aria-label={`${node.displayName} specs`}>
           <SpecIcon kind="cpu" label={formatCores(node.cpuCores)} />
-          <SpecIcon kind="memory" label={formatKulinBytes(node.memoryTotalBytes)} />
-          <SpecIcon kind="disk" label={formatKulinBytes(node.diskTotalBytes)} />
+          <SpecIcon kind="memory" label={formatKulinBytes(node.memoryTotalBytes, { total: true })} />
+          <SpecIcon kind="disk" label={formatKulinBytes(node.diskTotalBytes, { total: true })} />
         </section>
       )}
 
       <section className="node-usage" aria-label={`${node.displayName} usage`}>
         <div className="node-usage-grid">
           <UsageBar tone="cpu" label="CPU" valueText={`${formatUsage(node.cpuPercent)}%`} percent={node.cpuPercent} detail={capsule ? `${formatCores(node.cpuCores)} · ${formatLoad(node.load1)} / ${formatLoad(node.load5)} / ${formatLoad(node.load15)}` : undefined} />
-          <UsageBar tone="memory" label="内存" valueText={`${formatUsage(memoryPercent)}%`} percent={memoryPercent} detail={capsule ? `${formatKulinBytes(node.memoryUsedBytes)} / ${formatKulinBytes(node.memoryTotalBytes)}` : undefined} />
-          <UsageBar tone="disk" label="存储" valueText={`${formatUsage(diskPercent)}%`} percent={diskPercent} detail={capsule ? `${formatKulinBytes(node.diskUsedBytes)} / ${formatKulinBytes(node.diskTotalBytes)}` : undefined} />
-          <UsageBar tone="traffic" label={formatTrafficLabel()} valueText={capsule ? `${formatUsage(trafficPercent)}%` : `${formatKulinBytes(node.monthlyBillableBytes, { compact: true })} / ${formatKulinBytes(node.monthlyQuotaBytes, { compact: true })}`} percent={trafficPercent} detail={capsule ? `${formatKulinBytes(node.monthlyBillableBytes)} / ${formatKulinBytes(node.monthlyQuotaBytes)}` : undefined} />
+          <UsageBar tone="memory" label="内存" valueText={`${formatUsage(memoryPercent)}%`} percent={memoryPercent} detail={capsule ? `${formatKulinBytes(node.memoryUsedBytes)} / ${formatKulinBytes(node.memoryTotalBytes, { total: true })}` : undefined} />
+          <UsageBar tone="disk" label="存储" valueText={`${formatUsage(diskPercent)}%`} percent={diskPercent} detail={capsule ? `${formatKulinBytes(node.diskUsedBytes)} / ${formatKulinBytes(node.diskTotalBytes, { total: true })}` : undefined} />
+          <UsageBar tone="traffic" label={formatTrafficLabel()} valueText={capsule ? `${formatUsage(trafficPercent)}%` : `${formatKulinBytes(node.monthlyBillableBytes)} / ${formatKulinBytes(node.monthlyQuotaBytes, { total: true })}`} percent={trafficPercent} detail={capsule ? `${formatKulinBytes(node.monthlyBillableBytes)} / ${formatKulinBytes(node.monthlyQuotaBytes, { total: true })}` : undefined} />
         </div>
         <section className="node-footer-grid" aria-label={`${node.displayName} network, billing, and health`}>
           <Metric tone="up" icon={<UploadIcon />} label="上传" value={formatRate(node.netOutSpeedBps)} />
           <Metric tone="down" icon={<DownloadIcon />} label="下载" value={formatRate(node.netInSpeedBps)} />
           <Metric tone="expiry" stateTone={expiry?.tone} icon={<CalendarIcon />} label="剩余" value={expiryMetricValue(expiry)} />
           <Metric tone="billing" icon={<WalletIcon />} label="账单" value={renewalCost ?? '--'} />
-          <HealthHistoryRow kind="latency" icon={<ActivityIcon />} label="延迟" value={latency?.avgMs != null ? formatLatency(latency.avgMs) : '--ms'} points={hourlyHistory} />
-          <HealthHistoryRow kind="loss" icon={<TriangleAlertIcon />} label="丢包率" value={latency ? normalizeLoss(latency.lossPercent) : '--%'} points={hourlyHistory} />
+          <HealthHistoryRow kind="latency" icon={<ActivityIcon />} label="延迟" value={formatLatency(latency?.avgMs)} points={hourlyHistory} />
+          <HealthHistoryRow kind="loss" icon={<TriangleAlertIcon />} label="丢包率" value={latency ? normalizeLoss(latency.lossPercent) : '--'} points={hourlyHistory} />
         </section>
       </section>
-    </article>
+    </div>
   )
 }
 
@@ -311,7 +328,7 @@ function HealthHistoryRow({ kind, icon, label, value, points }: { kind: HistoryK
         </span>
         <strong>{value}</strong>
       </div>
-      <div className="health-history-strip" aria-label={`${label} 12小时趋势`}>
+      <div className="health-history-strip" role="img" aria-label={historyStripSummary(kind, label, points)}>
         {points.map((point, index) => {
           const metricValue = kind === 'latency' ? point.latencyMs : point.lossPercent
           return (
@@ -319,7 +336,6 @@ function HealthHistoryRow({ kind, icon, label, value, points }: { kind: HistoryK
               key={`${point.startedAt || 'empty'}-${index}`}
               className={`history-cell history-${kind} is-${historyTone(kind, metricValue)}`}
               title={historyTitle(kind, point)}
-              aria-label={historyTitle(kind, point)}
             />
           )
         })}

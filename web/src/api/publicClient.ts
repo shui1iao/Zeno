@@ -1,9 +1,9 @@
 import type { AdminSettings } from '../types'
 import { adminCookieSessionMarker, captureAdminTokenIdentity } from '../lib/adminToken'
-import { normalizeNodeLatency, normalizeNodeState, normalizeServiceLatency, normalizeSettings, normalizeSummary } from './publicNormalizers'
-import type { ApiLatencyResponse, ApiServiceLatencyResponse, ApiSettings, ApiStateResponse, ApiSummaryResponse, NodeLatencyData, NodeStateData, ServiceLatencyData, SummaryData } from './apiTypes'
-export type { ApiLatencyResponse, ApiServiceLatencyResponse, ApiStateResponse, ApiSummaryResponse, NodeLatencyData, NodeStateData, ServiceLatencyData, SummaryData } from './apiTypes'
-export { nodeLatencySnapshotKey, normalizeNodeLatency, normalizeNodeState, normalizeServiceLatency, normalizeSettings, normalizeSummary } from './publicNormalizers'
+import { normalizeNodeLatency, normalizeNodeState, normalizeSettings, normalizeSummary } from './publicNormalizers'
+import type { ApiLatencyResponse, ApiSettings, ApiStateResponse, ApiSummaryResponse, NodeLatencyData, NodeStateData, SummaryData } from './apiTypes'
+export type { ApiLatencyResponse, ApiStateResponse, ApiSummaryResponse, NodeLatencyData, NodeStateData, SummaryData } from './apiTypes'
+export { nodeLatencySnapshotKey, normalizeNodeLatency, normalizeNodeState, normalizeSettings, normalizeSummary } from './publicNormalizers'
 
 export type LiveWebSocketStatus = 'connecting' | 'open' | 'reconnecting' | 'closed'
 
@@ -91,10 +91,6 @@ export function subscribeNodeLatency(nodeId: string, range: string, onLatency: (
 
 export function subscribeNodeState(nodeId: string, range: string, onState: (state: NodeStateData) => void, onError?: (error: Error) => void, onStatus?: (status: LiveWebSocketStatus) => void): (() => void) | null {
   return subscribeLiveWebSocket(`/api/public/v1/nodes/${encodeURIComponent(nodeId)}/state/ws?range=${encodeURIComponent(range)}`, (payload) => normalizeNodeState(payload as ApiStateResponse), onState, onError, onStatus)
-}
-
-export function subscribeServiceLatency(targetId: string, range: string, onLatency: (latency: ServiceLatencyData) => void, onError?: (error: Error) => void, onStatus?: (status: LiveWebSocketStatus) => void): (() => void) | null {
-  return subscribeLiveWebSocket(`/api/public/v1/services/${encodeURIComponent(targetId)}/latency/ws?range=${encodeURIComponent(range)}`, (payload) => normalizeServiceLatency(payload as ApiServiceLatencyResponse), onLatency, onError, onStatus)
 }
 
 function optionalAdminHeaders(adminToken?: string): HeadersInit {
@@ -218,14 +214,6 @@ export async function fetchNodeLatency(nodeId: string, range = '1h', adminToken?
   const prefetched = consumePrefetchedNodeDetail(nodeLatencyPrefetches, nodeDetailPrefetchKey(nodeId, range, adminToken))
   if (prefetched) return awaitPrefetchedNodeDetail(prefetched, signal)
   return requestNodeLatency(nodeId, range, adminToken, signal)
-}
-
-export async function fetchServiceLatency(targetId: string, range = '1h', adminToken?: string, signal?: AbortSignal): Promise<ServiceLatencyData> {
-  const response = await fetch(`/api/public/v1/services/${encodeURIComponent(targetId)}/latency?range=${encodeURIComponent(range)}`, { signal, headers: optionalAdminHeaders(adminToken) })
-  if (!response.ok) {
-    throw new Error(`service latency request failed: ${response.status}`)
-  }
-  return normalizeServiceLatency(await response.json() as ApiServiceLatencyResponse)
 }
 
 async function requestNodeState(nodeId: string, range = '1h', adminToken?: string, signal?: AbortSignal): Promise<NodeStateData> {

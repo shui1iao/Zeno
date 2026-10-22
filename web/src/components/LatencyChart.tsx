@@ -8,7 +8,8 @@ import {
   type KulinChartRow,
   type KulinTargetSeries,
 } from '../lib/kulinLatencyChart'
-import { formatPercent } from '../lib/format'
+import { formatClock, formatLatency, formatPercent, formatTooltipDateTime } from '../lib/format'
+import { latencySeriesColor as paletteColor } from '../lib/seriesColors'
 import { OverlaySurface } from './OverlaySurface'
 
 interface LatencyChartProps {
@@ -20,17 +21,21 @@ interface LatencyChartProps {
   hideLegend?: boolean
   peakCut?: boolean
   activeTargetIds?: string[]
+  /** Colour per series id in the global (admin) order; falls back to the local index. */
+  seriesColors?: ReadonlyMap<string, string>
 }
 
-const desktopLayout = { width: 960, height: 360, lineStrokeWidth: 1, pad: { left: 52, right: 24, top: 24, bottom: 44 } }
-const mobileLayout = { width: 400, height: 320, lineStrokeWidth: 1, pad: { left: 46, right: 16, top: 22, bottom: 44 } }
-const palette = ['#22c55e', '#38bdf8', '#f59e0b', '#a78bfa', '#fb7185', '#14b8a6', '#84cc16', '#f97316', '#06b6d4', '#e879f9']
+const desktopLayout = { width: 960, height: 360, lineStrokeWidth: 1, pad: { left: 60, right: 24, top: 24, bottom: 44 } }
+const mobileLayout = { width: 400, height: 320, lineStrokeWidth: 1, pad: { left: 50, right: 16, top: 22, bottom: 44 } }
 const packetLossColor = '#94a3b8'
 const maxDrawableLatencyMs = 5000
 
 export function latencySeriesColor(index: number): string {
-  const normalized = ((Math.trunc(index) % palette.length) + palette.length) % palette.length
-  return palette[normalized]
+  return paletteColor(index)
+}
+
+function seriesColorResolver(series: KulinTargetSeries[], seriesColors?: ReadonlyMap<string, string>) {
+  return (key: string): string => seriesColors?.get(key) ?? latencySeriesColor(paletteIndexForKey(series, key))
 }
 
 export function LatencyChart({
@@ -42,12 +47,14 @@ export function LatencyChart({
   hideLegend = false,
   peakCut = false,
   activeTargetIds = [],
+  seriesColors,
 }: LatencyChartProps) {
   const { width, height, lineStrokeWidth, pad } = useLatencyChartLayout()
   const reactClipId = useId()
   const clipId = `latency-plot-${reactClipId.replace(/:/g, '')}`
   const activeTargetKey = JSON.stringify(activeTargetIds)
   const series = useMemo(() => buildKulinTargetSeries(points), [points])
+  const colorFor = useMemo(() => seriesColorResolver(series, seriesColors), [series, seriesColors])
   const allRows = useMemo(() => buildKulinChartRows(series), [series])
   const baseView = useMemo(() => selectKulinChartView(series, allRows, activeTargetIds), [series, allRows, activeTargetKey])
   const rows = useMemo(() => (peakCut ? applyKulinPeakCut(baseView.rows, baseView.lineKeys) : baseView.rows), [baseView, peakCut])
@@ -171,7 +178,8 @@ export function LatencyChart({
           return (
             <g key={ratio}>
               <line x1={pad.left} x2={width - pad.right} y1={yy} y2={yy} className="grid-line" />
-              <text x={12} y={yy + 4} className="axis-label">{formatYAxisValue(value)}ms</text>
+              {/* Right-aligned to the plot edge: the spaced " ms" label must not run into the plot. */}
+              <text x={pad.left - 6} y={yy + 4} className="axis-label" textAnchor="end">{formatYAxisValue(value)} ms</text>
             </g>
           )
         })}
@@ -206,7 +214,7 @@ export function LatencyChart({
             key={key}
             d={linePath(rows, key, x, yDelay)}
             fill="none"
-            stroke={latencySeriesColor(paletteIndexForKey(series, key))}
+            stroke={colorFor(key)}
             strokeWidth={lineStrokeWidth}
             vectorEffect="non-scaling-stroke"
             clipPath={`url(#${clipId})`}
@@ -230,7 +238,7 @@ export function LatencyChart({
                 cx={x(hoverColumn.createdAt)}
                 cy={yDelay(point.delay)}
                 r={5}
-                fill={latencySeriesColor(paletteIndexForKey(series, point.key))}
+                fill={colorFor(point.key)}
                 clipPath={`url(#${clipId})`}
               />
             ))}
@@ -242,6 +250,7 @@ export function LatencyChart({
           y={pad.top}
           width={width - pad.left - pad.right}
           height={plotHeight}
+          aria-hidden="true"
           aria-label={hoverColumn?.title ?? '延迟图表悬浮区域'}
           onMouseEnter={handleHoverMove}
           onMouseMove={handleHoverMove}
@@ -250,7 +259,7 @@ export function LatencyChart({
         {hoverColumn && (
           <LatencyTooltip
             column={hoverColumn}
-            series={series}
+            colorFor={colorFor}
             x={x(hoverColumn.createdAt)}
             layout={{ width, height, lineStrokeWidth, pad }}
           />
@@ -259,10 +268,9 @@ export function LatencyChart({
 
       {!hideLegend && (
         <div className="latency-legend">
-          {legendSeries.map((item, index) => {
-            const seriesIndex = series.findIndex((seriesItem) => seriesItem.targetId === item.targetId)
-            return <span key={item.targetId}><i style={{ background: latencySeriesColor(seriesIndex >= 0 ? seriesIndex : index) }} />{item.targetName}</span>
-          })}
+          {legendSeries.map((item) => (
+            <span key={item.targetId}><i style={{ background: colorFor(item.targetId) }} />{item.targetName}</span>
+          ))}
           {baseView.showPacketLossArea && baseView.packetLossKey && packetLossSeries && (
             <span><i style={{ background: packetLossColor }} />{packetLossSeries.targetName} 丢包 {formatPercent(avgPacketLoss(lossRows, baseView.packetLossKey))}</span>
           )}
@@ -287,7 +295,7 @@ function useLatencyChartLayout() {
   return isMobile ? mobileLayout : desktopLayout
 }
 
-function LatencyTooltip({ column, series, x: tooltipAnchorX, layout }: { column: HoverColumn; series: KulinTargetSeries[]; x: number; layout: typeof desktopLayout }) {
+function LatencyTooltip({ column, colorFor, x: tooltipAnchorX, layout }: { column: HoverColumn; colorFor: (key: string) => string; x: number; layout: typeof desktopLayout }) {
   const { width, height, pad } = layout
   const isMobile = width <= 480
   const plotWidth = width - pad.left - pad.right
@@ -307,7 +315,7 @@ function LatencyTooltip({ column, series, x: tooltipAnchorX, layout }: { column:
             <div className="latency-tooltip-grid" style={{ gridTemplateColumns: `repeat(${tooltipColumns}, minmax(0, 1fr))` }}>
               {column.points.map((point) => (
                 <span key={`${point.key}-${column.createdAt}`} className="latency-tooltip-row">
-                  <i style={{ backgroundColor: latencySeriesColor(paletteIndexForKey(series, point.key)) }} />
+                  <i style={{ backgroundColor: colorFor(point.key) }} />
                   <b>{point.label}</b>
                   <strong>{formatLatencyValue(point.delay)}</strong>
                 </span>
@@ -449,13 +457,11 @@ function paletteIndexForKey(series: KulinTargetSeries[], key: string): number {
 }
 
 function formatLatencyValue(value: number): string {
-  return `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(2)}ms`
+  return formatLatency(value)
 }
 
 function formatTooltipTime(createdAt: number): string {
-  const date = new Date(createdAt)
-  if (Number.isNaN(date.getTime())) return '--:--'
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatTooltipDateTime(createdAt)
 }
 
 function avgPacketLoss(rows: KulinChartRow[], packetLossKey: string): number {
@@ -605,7 +611,7 @@ function formatAxisTime(createdAt: number, timestamps: number[]): string {
   const start = timestamps[0] ?? createdAt
   const end = timestamps.at(-1) ?? createdAt
   const spanHours = (end - start) / 3_600_000
-  const time = `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`
+  const time = formatClock(date)
   if (spanHours > 36) return `${date.getMonth() + 1}/${date.getDate()} ${time}`
   return time
 }

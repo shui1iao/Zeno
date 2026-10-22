@@ -55,9 +55,25 @@ export async function fetchAdminAccount(adminToken: string, signal?: AbortSignal
   return { username: data.account.username }
 }
 
+/**
+ * Asks the controller whether the HttpOnly admin cookie is a live session.
+ * The endpoint answers anonymous visitors with 200 {"authenticated":false},
+ * so the public dashboard no longer logs a 401 for every visitor.
+ */
+export async function fetchAdminSessionStatus(signal?: AbortSignal): Promise<boolean> {
+  const response = await fetch('/api/admin/v1/session', {
+    signal,
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  })
+  if (!response.ok) return false
+  const data = await response.json() as { authenticated?: unknown }
+  return data.authenticated === true
+}
+
 export function probeAdminCookieSession(): Promise<boolean> {
   if (adminCookieSessionProbe === null) {
-    adminCookieSessionProbe = fetchAdminAccount(adminCookieSessionMarker).then(() => true, () => false)
+    adminCookieSessionProbe = fetchAdminSessionStatus().catch(() => false)
   }
   return adminCookieSessionProbe
 }

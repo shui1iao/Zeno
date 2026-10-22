@@ -1,13 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { HomeCardNode, LatencyPoint, StatePoint } from '../types'
-import { formatLatency } from '../lib/format'
+import { formatDateTime, formatLatency } from '../lib/format'
 import { summarizeLatencyTargets } from '../lib/latencyTargets'
-import { latencySeriesColor, LatencyChart } from './LatencyChart'
+import { seriesColorMap } from '../lib/seriesColors'
+import { LatencyChart } from './LatencyChart'
+import { BackIcon, PacketLossIcon, packetLossTone } from './icons'
 import { ServerFlag } from './ServerFlag'
 import { StateHistoryPanel } from './StateHistoryPanel'
 import { availableHistoryRanges } from '../lib/historyRange'
 import { HistoryRangeSelector } from './HistoryRangeSelector'
+import { SmoothingSelector, type SmoothingMode } from './SmoothingSelector'
 
+const loadPlaceholder = '-- / -- / --'
 const DESKTOP_LATENCY_COLUMNS = 7
 const MOBILE_LATENCY_COLUMNS = 3
 
@@ -26,6 +30,8 @@ interface LatencyDetailProps {
   onRangeChange: (range: string) => void
   onStateRangeChange?: (range: string) => void
   topHeader?: ReactNode
+  /** Global latency-target order from the admin list; drives series colours. */
+  targetOrder?: string[]
 }
 
 function latencyTargetCorners(index: number, total: number, columns: number): string {
@@ -56,10 +62,17 @@ export function LatencyDetail({
   onRangeChange,
   onStateRangeChange = () => {},
   topHeader,
+  targetOrder = [],
 }: LatencyDetailProps) {
   const targetSummaries = useMemo(() => summarizeLatencyTargets(points), [points])
+  const targetOrderKey = targetOrder.join('\n')
+  const seriesColors = useMemo(
+    () => seriesColorMap(targetOrder, targetSummaries.map((target) => target.targetId)),
+    [targetOrderKey, targetSummaries],
+  )
   const [activeTargetIds, setActiveTargetIds] = useState<string[]>([])
-  const [peakCut, setPeakCut] = useState(false)
+  const [smoothing, setSmoothing] = useState<SmoothingMode>('raw')
+  const peakCut = smoothing === 'smooth'
   const rangeOptions = availableHistoryRanges(canUseExtendedRanges)
   const rangeLabel = rangeOptions.find((option) => option.value === range)?.label ?? range
   const latestState = latestStatePoint(statePoints)
@@ -74,7 +87,7 @@ export function LatencyDetail({
     ? `${formatFixed(latestState.load1, 2)} / ${formatFixed(latestState.load5, 2)} / ${formatFixed(latestState.load15, 2)}`
     : node.load1 !== null && node.load1 !== undefined && node.load5 !== null && node.load5 !== undefined && node.load15 !== null && node.load15 !== undefined
       ? `${formatFixed(node.load1, 2)} / ${formatFixed(node.load5, 2)} / ${formatFixed(node.load15, 2)}`
-    : '-- / -- / --'
+    : loadPlaceholder
   const memoryUsageValue = formatBinaryUsage(
     latestState?.memoryUsedBytes ?? node.memoryUsedBytes,
     latestState?.memoryTotalBytes ?? node.memoryTotalBytes,
@@ -115,7 +128,7 @@ export function LatencyDetail({
             <InfoFact label="磁盘" value={diskUsageValue} />
             <InfoFact label="开机时间" value={formatBootTime(node.bootTime)} />
             <InfoFact label="运行时间" value={uptimeValue ?? '--'} adaptive pending={!uptimeValue} />
-            <InfoFact label="负载" value={loadValue} adaptive pending={loadValue === '-- / -- / --'} />
+            <InfoFact label="负载" value={loadValue} adaptive keepWhole pending={loadValue === loadPlaceholder} />
             <TrafficFact sent={formatBinaryBytes(node.netOutTotalBytes)} received={formatBinaryBytes(node.netInTotalBytes)} />
           </section>
         </section>
@@ -126,15 +139,7 @@ export function LatencyDetail({
           <div className="monitor-heading-title">
             <div className="monitor-title-row">
               <h3>网络延迟</h3>
-              <button
-                type="button"
-                className={`peak-switch sliding-selector--compact${peakCut ? ' is-active' : ''}`}
-                aria-pressed={peakCut}
-                onClick={() => setPeakCut((current) => !current)}
-              >
-                <span aria-hidden="true" />
-                <b>平滑</b>
-              </button>
+              <SmoothingSelector value={smoothing} onChange={setSmoothing} />
             </div>
             <p>{showLatencySkeleton ? '同步监控服务…' : `${targetSummaries.length} 个监控服务`}</p>
           </div>
@@ -163,6 +168,7 @@ export function LatencyDetail({
                     key={target.targetId}
                     type="button"
                     title={`${target.targetName} · ${formatLatency(target.avgMs)} · 丢包 ${formatLossPercent(target.lossPercent)}`}
+                    aria-pressed={activeTargetIds.includes(target.targetId)}
                     data-active={activeTargetIds.includes(target.targetId)}
                     data-desktop-corners={latencyTargetCorners(index, targetSummaries.length, DESKTOP_LATENCY_COLUMNS)}
                     data-mobile-corners={latencyTargetCorners(index, targetSummaries.length, MOBILE_LATENCY_COLUMNS)}
@@ -173,11 +179,11 @@ export function LatencyDetail({
                     onClick={() => toggleTarget(target.targetId)}
                   >
                     <span className="latency-target-name">
-                      <i className="latency-target-color" style={{ backgroundColor: latencySeriesColor(index) }} aria-hidden="true" />
+                      <i className="latency-target-color" style={{ backgroundColor: seriesColors.get(target.targetId) }} aria-hidden="true" />
                       <span>{target.targetName}</span>
                     </span>
                     <strong>{formatLatency(target.avgMs)}</strong>
-                    <em>丢包 {formatLossPercent(target.lossPercent)}</em>
+                    <em className="latency-target-loss" data-tone={packetLossTone(target.lossPercent)}><PacketLossIcon />丢包 {formatLossPercent(target.lossPercent)}</em>
                 </button>
               ))}
             </div>
@@ -191,6 +197,7 @@ export function LatencyDetail({
               hideLegend
               peakCut={peakCut}
               activeTargetIds={activeTargetIds}
+              seriesColors={seriesColors}
             />
           </>
         )}
@@ -217,7 +224,7 @@ function LatencyLoadingSkeleton() {
         {Array.from({ length: 7 }).map((_, index) => (
           <button key={index} type="button" disabled>
             <span>同步中</span>
-            <strong>-- ms</strong>
+            <strong>--</strong>
             <em>丢包 --</em>
           </button>
         ))}
@@ -229,7 +236,25 @@ function LatencyLoadingSkeleton() {
   )
 }
 
-function InfoFact({ label, value, wide = false, adaptive = false, pending = false }: { label: string; value: string; wide?: boolean; adaptive?: boolean; pending?: boolean }) {
+// Values are split into chunks that may wrap between, but never inside: "2 Virtual Cores",
+// "1.95 GB" and each load triple stay whole, so a number never parts from its unit.
+function factChunks(value: string): string[] {
+  return value.split(/( · | \/ )/).reduce<string[]>((chunks, part, index) => {
+    if (index % 2 === 1) chunks[chunks.length - 1] += part.trimEnd()
+    else chunks.push(part)
+    return chunks
+  }, [])
+}
+
+function FactValue({ value, keepWhole = false }: { value: string; keepWhole?: boolean }) {
+  if (keepWhole) return <span className="detail-fact-chunk">{value}</span>
+  const chunks = factChunks(value)
+  // Long free-form chunks (CPU model names) may still wrap internally.
+  // The separating space stays outside the no-wrap spans so that it remains a break opportunity.
+  return <>{chunks.map((chunk, index) => <Fragment key={index}>{index > 0 ? ' ' : ''}<span className={chunk.length <= 28 ? 'detail-fact-chunk' : 'detail-fact-chunk is-long'}>{chunk}</span></Fragment>)}</>
+}
+
+function InfoFact({ label, value, wide = false, adaptive = false, pending = false, keepWhole = false }: { label: string; value: string; wide?: boolean; adaptive?: boolean; pending?: boolean; keepWhole?: boolean }) {
   const valueRef = useRef<HTMLElement>(null)
   const [multiline, setMultiline] = useState(false)
 
@@ -263,7 +288,7 @@ function InfoFact({ label, value, wide = false, adaptive = false, pending = fals
   return (
     <article className={`detail-fact${wide ? ' is-wide' : ''}${adaptive ? ' is-adaptive' : ''}${multiline ? ' is-multiline' : ''}${pending ? ' is-pending' : ''}`} title={`${label}: ${value}`}>
       <p>{label}</p>
-      <strong>{adaptive ? <span ref={valueRef}>{value}</span> : value}</strong>
+      <strong>{adaptive ? <span ref={valueRef}><FactValue value={value} keepWhole={keepWhole} /></span> : <FactValue value={value} keepWhole={keepWhole} />}</strong>
     </article>
   )
 }
@@ -328,10 +353,7 @@ function coreTypeLabel(virtualization?: string): { singular: string; plural: str
 }
 
 function formatBootTime(value: string | undefined): string {
-  if (!value) return '--'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(value)
 }
 
 function formatBinaryBytes(value: number | null | undefined): string {
@@ -349,11 +371,12 @@ function formatBinaryBytes(value: number | null | undefined): string {
 
 function formatBinaryUsage(used: number | null | undefined, total: number | null | undefined): string {
   if ((used === null || used === undefined) && (total === null || total === undefined)) return '--'
-  return `${formatBinaryBytes(used)} / ${formatBinaryBytes(total)}`
+  // Whole-number totals drop the redundant ".00" (e.g. "50 GB").
+  return `${formatBinaryBytes(used)} / ${formatBinaryBytes(total).replace(/\.00 /, ' ')}`
 }
 
 function formatLossPercent(value: number | null | undefined): string {
-  if (value === null || value === undefined) return 'No data'
+  if (value === null || value === undefined || !Number.isFinite(value)) return '--'
   return `${value.toFixed(2)}%`
 }
 
@@ -376,10 +399,3 @@ function formatFixed(value: number, digits: number): string {
   return value.toFixed(digits)
 }
 
-function BackIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m15 18-6-6 6-6" />
-    </svg>
-  )
-}

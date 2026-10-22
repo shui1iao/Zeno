@@ -112,26 +112,6 @@ func TestLatencyGridPointsStayDenseAcrossWindowsAndDimensions(t *testing.T) {
 				t.Fatalf("first bucket target order = %s,%s, want t-1,t-2", got[0].TargetID, got[1].TargetID)
 			}
 		})
-
-		t.Run("service/"+rangeName, func(t *testing.T) {
-			store := newLatencyGridTestStore(t)
-			window, ok := resolveLatencyGridWindow(rangeName)
-			if !ok {
-				t.Fatalf("resolve grid window %q", rangeName)
-			}
-			seedLatencyGridFixture(ctx, t, store, window)
-
-			got, err := store.serviceLatencyGridPoints(ctx, "t-1", window)
-			if err != nil {
-				t.Fatalf("service latency grid: %v", err)
-			}
-			if len(got) != window.Samples*2 {
-				t.Fatalf("point count = %d, want %d (samples × enabled nodes)", len(got), window.Samples*2)
-			}
-			if got[0].NodeID != "node-a" || got[1].NodeID != "node-b" {
-				t.Fatalf("first bucket node order = %s,%s, want node-a,node-b", got[0].NodeID, got[1].NodeID)
-			}
-		})
 	}
 }
 
@@ -221,69 +201,18 @@ func TestHistoricalLatencyGridUsesLatestSamplePerDisplayBucket(t *testing.T) {
 	t.Fatalf("missing first historical point for t-1 at %s", firstTimestamp)
 }
 
-func TestServiceLatencyGridPointsHonoursNodeDimension(t *testing.T) {
-	ctx := context.Background()
-	store := newLatencyGridTestStore(t)
-	window, _ := resolveLatencyGridWindow("1h")
-	seedLatencyGridFixture(ctx, t, store, window)
-	start, _, _ := latencyGridBounds(window)
-
-	points, err := store.serviceLatencyGridPoints(ctx, "t-1", window)
-	if err != nil {
-		t.Fatalf("service latency grid: %v", err)
-	}
-
-	seen := map[string]bool{}
-	for _, point := range points {
-		seen[point.NodeID] = true
-		if point.NodeID == "node-off" {
-			t.Fatalf("disabled node leaked into service grid: %+v", point)
-		}
-	}
-	if !seen["node-a"] || !seen["node-b"] {
-		t.Fatalf("expected node-a and node-b series, got %v", seen)
-	}
-	// Series order follows display_order, so node-a precedes node-b in every bucket.
-	if points[0].NodeID != "node-a" || points[1].NodeID != "node-b" {
-		t.Fatalf("series order = %s,%s, want node-a,node-b", points[0].NodeID, points[1].NodeID)
-	}
-
-	tsOf := func(unix int64) string { return time.Unix(unix, 0).UTC().Format(time.RFC3339) }
-	var firstNodeB *ServiceLatencyPoint
-	for index := range points {
-		if points[index].NodeID == "node-b" && points[index].TS == tsOf(start.Unix()) {
-			firstNodeB = &points[index]
-			break
-		}
-	}
-	if firstNodeB == nil {
-		t.Fatal("missing node-b first bucket")
-	}
-	// node-b's first bucket comes only from the rollup row (90/1, 99/1, 6/1).
-	assertFloatPtr(t, "node-b rollup median", firstNodeB.MedianMS, 90)
-	assertFloatPtr(t, "node-b rollup avg", firstNodeB.AvgMS, 99)
-	assertFloat(t, "node-b rollup loss", firstNodeB.LossPercent, 6)
-}
-
 func TestLatencyGridPointsEmptyResults(t *testing.T) {
 	ctx := context.Background()
 	store := newLatencyGridTestStore(t)
 	window, _ := resolveLatencyGridWindow("1h")
 
-	// No configured series at all: both dimensions return non-nil empty slices.
+	// No configured series at all: a non-nil empty slice.
 	points, err := store.latencyGridPoints(ctx, "missing-node", window)
 	if err != nil {
 		t.Fatalf("latency grid on empty db: %v", err)
 	}
 	if points == nil || len(points) != 0 {
 		t.Fatalf("latency grid = %#v, want empty non-nil slice", points)
-	}
-	servicePoints, err := store.serviceLatencyGridPoints(ctx, "missing-target", window)
-	if err != nil {
-		t.Fatalf("service latency grid on empty db: %v", err)
-	}
-	if servicePoints == nil || len(servicePoints) != 0 {
-		t.Fatalf("service latency grid = %#v, want empty non-nil slice", servicePoints)
 	}
 
 	// Series configured but no measurements: dense grid of empty buckets.
@@ -304,11 +233,8 @@ func TestLatencyGridPointsEmptyResults(t *testing.T) {
 		}
 	}
 
-	// Unknown range names short-circuit to (nil, nil) on both dimensions.
+	// Unknown range names short-circuit to (nil, nil).
 	if points, err := store.latencyGridPoints(ctx, "node-a", latencyWindow{Name: "nope", Samples: 5, Step: time.Minute}); err != nil || points != nil {
-		t.Fatalf("unknown window = (%#v, %v), want (nil, nil)", points, err)
-	}
-	if points, err := store.serviceLatencyGridPoints(ctx, "t-1", latencyWindow{Name: "nope", Samples: 5, Step: time.Minute}); err != nil || points != nil {
 		t.Fatalf("unknown window = (%#v, %v), want (nil, nil)", points, err)
 	}
 }
@@ -326,9 +252,6 @@ func TestLatencyGridPointsPropagatesQueryErrors(t *testing.T) {
 	if _, err := seriesStore.latencyGridPoints(ctx, "node-a", window); err == nil {
 		t.Fatal("expected series lookup error for latency grid")
 	}
-	if _, err := seriesStore.serviceLatencyGridPoints(ctx, "t-1", window); err == nil {
-		t.Fatal("expected series lookup error for service latency grid")
-	}
 
 	// Measurement query failure: series resolve fine, the aggregation source is gone.
 	measurementStore := newLatencyGridTestStore(t)
@@ -339,11 +262,8 @@ func TestLatencyGridPointsPropagatesQueryErrors(t *testing.T) {
 	if _, err := measurementStore.latencyGridPoints(ctx, "node-a", window); err == nil {
 		t.Fatal("expected measurement query error for latency grid")
 	}
-	if _, err := measurementStore.serviceLatencyGridPoints(ctx, "t-1", window); err == nil {
-		t.Fatal("expected measurement query error for service latency grid")
-	}
 
-	// Closed database: both dimensions surface the driver error.
+	// Closed database: the driver error surfaces.
 	closedStore, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "zeno.db"))
 	if err != nil {
 		t.Fatalf("open sqlite store: %v", err)
@@ -354,9 +274,6 @@ func TestLatencyGridPointsPropagatesQueryErrors(t *testing.T) {
 	}
 	if _, err := closedStore.latencyGridPoints(ctx, "node-a", window); err == nil {
 		t.Fatal("expected error from closed db on latency grid")
-	}
-	if _, err := closedStore.serviceLatencyGridPoints(ctx, "t-1", window); err == nil {
-		t.Fatal("expected error from closed db on service latency grid")
 	}
 }
 
@@ -381,25 +298,8 @@ func TestLatencyGridQueryKeepsDimensionFilters(t *testing.T) {
 		t.Fatalf("node grid source filter count = %d, want 2\n%s", got, nodeQuery)
 	}
 
-	serviceQuery := latencyGridQuery(latencyGridByTarget)
-	for _, want := range []string{
-		"FROM probe_rounds WHERE target_id = ? AND ts >= ? AND ts < ?",
-		"FROM latency_history_rollups WHERE target_id = ? AND bucket_start >= ? AND bucket_start < ?",
-		"SELECT (measurements.ts / ?) * ? AS bucket_ts, measurements.node_id,",
-		"JOIN nodes n ON n.id = measurements.node_id",
-		"WHERE measurements.target_id = ?",
-		"AND n.disabled = 0",
-		"GROUP BY bucket_ts, measurements.node_id",
-	} {
-		if !strings.Contains(serviceQuery, want) {
-			t.Fatalf("service grid query missing %q\n%s", want, serviceQuery)
-		}
-	}
-	if strings.Contains(serviceQuery, enabledTargetSourceFilter) {
-		t.Fatalf("service grid query must not use node source filter:\n%s", serviceQuery)
-	}
-	// Both dimensions keep the enabled-link join and the probe_targets join.
-	for name, query := range map[string]string{"node": nodeQuery, "service": serviceQuery} {
+	// The grid keeps the enabled-link join and the probe_targets join.
+	for name, query := range map[string]string{"node": nodeQuery} {
 		for _, want := range []string{
 			"JOIN probe_targets pt ON pt.id = measurements.target_id",
 			"LEFT JOIN node_probe_targets npt ON npt.node_id = measurements.node_id AND npt.target_id = measurements.target_id",
@@ -413,7 +313,7 @@ func TestLatencyGridQueryKeepsDimensionFilters(t *testing.T) {
 }
 
 func TestHistoricalLatencySampleQueriesUseCompositeIndexSeeks(t *testing.T) {
-	for name, dimension := range map[string]latencyGridDimension{"node": latencyGridByNode, "service": latencyGridByTarget} {
+	for name, dimension := range map[string]latencyGridDimension{"node": latencyGridByNode} {
 		query := latencyGridSampleQuery(dimension)
 		for _, want := range []string{
 			"WITH RECURSIVE buckets",
@@ -437,7 +337,7 @@ func TestHistoricalLatencySampleQueryPlansSeekCompositeIndexes(t *testing.T) {
 	store := newLatencyGridTestStore(t)
 	window, _ := resolveLatencyGridWindow("30d")
 	start, _, stepSeconds := latencyGridBounds(window)
-	for name, dimension := range map[string]latencyGridDimension{"node": latencyGridByNode, "service": latencyGridByTarget} {
+	for name, dimension := range map[string]latencyGridDimension{"node": latencyGridByNode} {
 		plan := explainSQLiteQueryPlan(t, store, latencyGridSampleQuery(dimension),
 			start.Unix(), stepSeconds, window.Samples,
 			"dimension-id", "dimension-id", stepSeconds, "dimension-id", stepSeconds,

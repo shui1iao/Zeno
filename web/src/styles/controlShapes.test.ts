@@ -8,7 +8,7 @@ it('preserves original navigation and detail selector geometry on touch screens'
   const paintedOverrides: string[] = []
   css.walkRules(rule => {
     if (rule.selector.includes('::') || rule.selector.includes('svg')) return
-    if (!/\.nav-icon-button|\.detail-range-row|\.peak-switch/.test(rule.selector)) return
+    if (!/\.nav-icon-button|\.detail-range-row|\.smoothing-selector/.test(rule.selector)) return
     rule.walkDecls(decl => {
       if (/^(width|min-width|height|min-height|grid-template-columns|--selector-height)$/.test(decl.prop)) {
         paintedOverrides.push(`${rule.selector}: ${decl.prop}=${decl.value}`)

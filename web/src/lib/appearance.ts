@@ -269,10 +269,12 @@ export function useDocumentTheme(settings: AdminSettings) {
   ])
 }
 
-export function documentBrandingForSettings(settings: AdminSettings) {
+/** Browser tab title: "<page> · <site title>", or just the site title on the home page. */
+export function documentBrandingForSettings(settings: AdminSettings, pageTitle?: string) {
   const siteTitle = (settings.siteTitle || defaultSettings.siteTitle).trim() || defaultSettings.siteTitle
   const logoUrl = (settings.logoUrl || defaultSettings.logoUrl).trim() || defaultSettings.logoUrl
-  return { title: siteTitle, iconHref: logoUrl }
+  const page = pageTitle?.trim() ?? ''
+  return { title: page === '' ? siteTitle : `${page} · ${siteTitle}`, iconHref: logoUrl }
 }
 
 export const themeOptions: Array<{ value: AdminTheme; label: string }> = [
@@ -282,9 +284,9 @@ export const themeOptions: Array<{ value: AdminTheme; label: string }> = [
 ]
 
 
-export function applyDocumentBranding(settings: AdminSettings) {
+export function applyDocumentBranding(settings: AdminSettings, pageTitle?: string) {
   if (typeof document === 'undefined') return
-  const branding = documentBrandingForSettings(settings)
+  const branding = documentBrandingForSettings(settings, pageTitle)
   document.title = branding.title
   let icon = document.head.querySelector<HTMLLinkElement>('link[rel="icon"]')
   if (!icon) {

@@ -104,8 +104,8 @@ export function formatDurationCompact(seconds: number): string {
 
 export function formatRenewalDayOption(days: number): string {
   if (days === 15) return '提前半个月'
-  if (days === 30) return '提前1个月'
-  return `提前${days}天`
+  if (days === 30) return '提前 1 个月'
+  return `提前 ${days} 天`
 }
 
 export function parseRenewalThreshold(value: string): number | null {

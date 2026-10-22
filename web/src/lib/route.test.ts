@@ -17,9 +17,11 @@ describe('parseDashboardRoute', () => {
     expect(parseDashboardRoute('/server/Example%20Edge%20HK')).toEqual({ kind: 'node', nodeId: 'Example Edge HK' })
   })
 
-  it('extracts decoded service target ids from service history URLs', () => {
-    expect(parseDashboardRoute('/service/google')).toEqual({ kind: 'service', targetId: 'google' })
-    expect(parseDashboardRoute('/service/Akari%20HK')).toEqual({ kind: 'service', targetId: 'Akari HK' })
+  it('treats the removed service pages like any other unknown path', () => {
+    expect(parseDashboardRoute('/services')).toEqual({ kind: 'home' })
+    expect(parseDashboardRoute('/services/')).toEqual({ kind: 'home' })
+    expect(parseDashboardRoute('/service/google')).toEqual({ kind: 'home' })
+    expect(parseDashboardRoute('/service/Akari%20HK')).toEqual({ kind: 'home' })
   })
 
   it('falls back to the safe canonical route for malformed percent-encoded ids', () => {

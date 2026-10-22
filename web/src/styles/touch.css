@@ -35,6 +35,26 @@
   .admin-date-picker .admin-date-permanent,
   .admin-select-menu-field .admin-select-trigger { min-height: 44px; }
 
+  /* Admin toggles keep their painted 20px box; the label grows a transparent
+     44px hit area around it (clicking a label toggles its checkbox). */
+  .admin-node-toggle { position: relative; }
+  .admin-node-toggle::after {
+    content: '';
+    position: absolute;
+    left: -12px;
+    right: 0;
+    top: 50%;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+  /* Range inputs cannot forward pointer events from a pseudo element, so the
+     transparent input box itself grows to 44px while the painted track and
+     thumb stay centred and unchanged; negative margins keep the layout. */
+  .admin-node-edit-form .admin-style-grid label.admin-style-range input[type="range"] {
+    height: 44px;
+    margin: -11px 0;
+  }
+
   /* Detail range and peak controls retain their shared compact geometry. */
 
   /* Currency menus retain their compact 34px base rows on phones too. */

@@ -179,7 +179,7 @@ CREATE TABLE probe_targets (
 - `ping`：ICMP ping，不带 `port`。
 - `http_get`：HTTP/HTTPS GET，不带 `port`。
 
-`display_order` 控制后台延迟监控列表、Agent 目标下发顺序、服务详情入口顺序和同一时间点的 Public latency series 展示顺序。历史数据库中仍为 0 的目标会在启动迁移时追加到已有正数顺序之后，并按 `created_at`、`id` 归一化为稳定的 10、20、30…；新目标未提交顺序时在创建事务中追加到当前最大顺序之后。探测目标创建后即为有效目标，不提供全局启用/停用状态；是否由某台服务器执行只由 `node_probe_targets.enabled` 控制。
+`display_order` 控制后台延迟监控列表、Agent 目标下发顺序和同一时间点的 Public latency series 展示顺序（服务器详情页取色也按此顺序）。历史数据库中仍为 0 的目标会在启动迁移时追加到已有正数顺序之后，并按 `created_at`、`id` 归一化为稳定的 10、20、30…；新目标未提交顺序时在创建事务中追加到当前最大顺序之后。探测目标创建后即为有效目标，不提供全局启用/停用状态；是否由某台服务器执行只由 `node_probe_targets.enabled` 控制。
 
 ## node_probe_targets
 

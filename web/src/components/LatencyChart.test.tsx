@@ -1,3 +1,4 @@
+import { latencySeriesColor } from '../lib/seriesColors'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { integerYAxisDomain, LatencyChart, pruneCollidingAxisTicks, yDomainForRows } from './LatencyChart'
@@ -72,7 +73,7 @@ describe('LatencyChart', () => {
     const labels = [...html.matchAll(/class="axis-label"[^>]*>([^<]+)<\/text>/g)].map((match) => match[1])
     const yAxisLabels = labels.filter((label) => label.endsWith('ms'))
 
-    expect(yAxisLabels).not.toContain('0ms')
+    expect(yAxisLabels).not.toContain('0 ms')
     expect(yAxisLabels.some((label) => label.startsWith('186') || label.startsWith('187') || label.startsWith('188'))).toBe(true)
   })
 
@@ -93,7 +94,7 @@ describe('LatencyChart', () => {
 
     expect(yAxisLabels).toHaveLength(5)
     expect(new Set(yAxisLabels).size).toBe(5)
-    expect(yAxisLabels.every((label) => /^\d+ms$/.test(label))).toBe(true)
+    expect(yAxisLabels.every((label) => /^\d+ ms$/.test(label))).toBe(true)
     const yAxisValues = yAxisLabels.map((label) => Number(label.replace('ms', '')))
     expect(Math.max(...yAxisValues) - Math.min(...yAxisValues)).toBeGreaterThanOrEqual(4)
     expect(yAxisValues.every((value, index) => index === 0 || Number.isInteger(yAxisValues[index - 1] - value))).toBe(true)
@@ -127,7 +128,7 @@ describe('LatencyChart', () => {
     ]
 
     const html = renderToStaticMarkup(<LatencyChart points={gapPoints} activeTargetIds={['alpha']} />)
-    const lineMatch = html.match(/<path[^>]+d="([^"]+)"[^>]+stroke="#22c55e"/)
+    const lineMatch = html.match(new RegExp(`<path[^>]+d="([^"]+)"[^>]+stroke="${latencySeriesColor(0)}"`))
 
     expect(lineMatch?.[1].match(/M/g)).toHaveLength(2)
     expect(lineMatch?.[1].match(/L/g) ?? []).toHaveLength(0)
@@ -144,7 +145,7 @@ describe('LatencyChart', () => {
     }))
 
     const html = renderToStaticMarkup(<LatencyChart points={minutePoints} activeTargetIds={['alpha']} />)
-    const lineMatch = html.match(/<path[^>]+d="([^"]+)"[^>]+stroke="#22c55e"/)
+    const lineMatch = html.match(new RegExp(`<path[^>]+d="([^"]+)"[^>]+stroke="${latencySeriesColor(0)}"`))
 
     expect(lineMatch?.[1].match(/M/g)).toHaveLength(1)
     expect(lineMatch?.[1].match(/L/g)).toHaveLength(1439)

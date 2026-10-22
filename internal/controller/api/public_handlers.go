@@ -8,43 +8,6 @@ import (
 	"time"
 )
 
-func (h *handler) handlePublicServiceResource(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	path := strings.TrimPrefix(r.URL.Path, "/api/public/v1/services/")
-	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) != 2 && len(parts) != 3 {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if parts[1] != "latency" || (len(parts) == 3 && parts[2] != "ws") {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	window, ok := resolveLatencyWindow(r.URL.Query().Get("range"))
-	if !ok {
-		writeError(w, http.StatusBadRequest, "unsupported range")
-		return
-	}
-	if extendedHistoryWindow(window) && !h.authorizeExtendedHistoryRequest(w, r) {
-		return
-	}
-	if len(parts) == 3 {
-		h.handleDetailLiveJSONWebSocket(w, r, serviceLatencyLiveTopic(parts[0], window.Name), func(ctx context.Context) ([]byte, error) {
-			return h.serviceLatencyJSON(ctx, parts[0], window)
-		})
-		return
-	}
-	payload, err := h.serviceLatencyJSON(r.Context(), parts[0], window)
-	if err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	writeRawJSON(w, http.StatusOK, payload)
-}
-
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")

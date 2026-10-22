@@ -118,6 +118,8 @@ svg { display: block; }
   box-shadow: inset 0 0 0 100vmax var(--zeno-background-overlay-color);
 }
 .kulin-shell > * { position: relative; z-index: 1; }
+/* The visually hidden page heading must stay out of the shell's flex flow. */
+.kulin-shell > .page-heading { position: absolute; }
 
 .kulin-shell[data-theme="light"],
 :root[data-zeno-theme="light"] {
@@ -186,7 +188,7 @@ svg { display: block; }
   display: grid;
   gap: 4px;
   padding: 6px;
-  border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+  border: 0;
   border-radius: var(--radius-card);
   color: var(--foreground);
 }
@@ -250,9 +252,8 @@ svg { display: block; }
   text-align: left;
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
 }
-.theme-menu-popover button { padding: 0 10px; border: 0; color: inherit; }
+.theme-menu-popover button { padding: 0 10px; color: inherit; }
 .theme-menu-popover button:hover { background: color-mix(in srgb, var(--blue) 8%, transparent); color: var(--blue); transform: none; }
-.theme-menu-popover button[data-active='true'] { background: color-mix(in srgb, var(--blue) 14%, transparent); color: var(--blue); box-shadow: none; }
 .theme-menu-popover span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
 .login-link {
   height: 36px;
@@ -502,10 +503,44 @@ svg { display: block; }
 }
 .route-state-card.is-error,
 .admin-state-card.is-error { color: var(--red); }
+.route-state-back {
+  padding: 12px 0 0;
+  border-top: 1px solid var(--divider-strong);
+}
+.route-state-back + .route-state-card { margin-top: 12px; }
+.route-state-back-button {
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 24px;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+.route-state-back-button:hover,
+.route-state-back-button:focus-visible,
+.route-state-back-button:active { color: var(--blue); background: transparent; outline: none; transform: none; }
+.route-state-back-button svg {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 @media (max-width: 767px) {
   .route-state-container { gap: 14px; }
   .route-state-panel.is-admin { min-height: calc(100dvh - 92px); }
   .route-state-card { min-height: 84px; margin-top: 14px; padding: 16px; }
+  .route-state-back-button { font-size: 19px; }
 }
 .home-top-card .home-summary {
   display: grid;
@@ -617,6 +652,7 @@ svg { display: block; }
   flex: none;
   text-align: right;
 }
+.home-summary__metric-value.home-summary__metric-value--total { gap: 4px; }
 .home-summary__metric-value--rate > span {
   width: auto;
   flex: none;
@@ -692,6 +728,7 @@ svg { display: block; }
   color: var(--blue);
   transform: none;
 }
+.theme-menu-popover button[data-active='true'],
 .home-currency-popover button[data-active="true"],
 .region-filter-buttons > button[aria-pressed='true'] {
   border-color: var(--control-selected-border);
@@ -902,6 +939,8 @@ svg { display: block; }
   align-items: center;
   text-align: center;
 }
+/* Debian's dark-red swirl and the near-black Linux glyph vanish on dark cards. */
+:root[data-zeno-theme='dark'] .node-os:is([data-os='debian'], [data-os='linux'], [data-os='centos'], [data-os='alpine'], [data-os='unknown']) { filter: brightness(1.9) saturate(1.15); }
 .node-os { position: static; grid-column: 1; justify-self: start; width: 20px; height: 20px; object-fit: contain; transform: none; }
 .server-flag { display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
 .server-flag__image { display: block; width: 1.333em; height: 1em; border-radius: 2px; object-fit: cover; }
@@ -1134,7 +1173,8 @@ svg { display: block; }
 .resource-card-title-block { min-width: 0; }
 .resource-card-title { margin: 0; color: var(--foreground); font-size: 15px; font-weight: 500; line-height: 1.25; }
 .resource-chart-legend { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
-.resource-chart-legend em { font-size: 11px; font-style: normal; font-weight: 500; line-height: 1.15; }
+.resource-chart-legend em { display: inline-flex; align-items: center; gap: 5px; color: var(--foreground); font-size: 11px; font-style: normal; font-weight: 500; line-height: 1.15; }
+.resource-chart-legend i { width: 7px; height: 7px; flex: none; border-radius: var(--radius-pill); }
 .resource-card-value {
   display: inline-flex;
   flex-direction: column;
@@ -1159,6 +1199,7 @@ svg { display: block; }
   column-gap: 8px;
   align-items: stretch;
 }
+.resource-chart-frame.has-rate-axis { grid-template-columns: minmax(46px, max-content) minmax(0, 1fr); }
 .resource-y-axis {
   grid-column: 1;
   grid-row: 1;
@@ -1166,12 +1207,16 @@ svg { display: block; }
   flex-direction: column;
   justify-content: space-between;
   min-width: 0;
-  padding: 1px 0 0;
+  /* Bleed half a label above and below the plot so that the top, middle and
+     bottom labels are centred on their grid lines (0, 50%, 100%). */
+  margin: -0.5em 0;
+  padding: 0;
   color: color-mix(in srgb, var(--foreground) 52%, transparent);
   font-size: 11px;
   font-weight: 500;
   line-height: 1;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .resource-chart-plot { position: relative; grid-column: 2; grid-row: 1; min-width: 0; min-height: 112px; }
 .resource-chart-svg { width: 100%; height: 100%; min-height: 112px; overflow: visible; }
@@ -1294,6 +1339,10 @@ svg { display: block; }
 .latency-target-grid .latency-target-color { width: 8px; height: 8px; flex: none; border-radius: var(--radius-pill); }
 .latency-target-grid strong { color: var(--foreground); font-size: 20px; line-height: 1.05; font-weight: 600; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .latency-target-grid em { color: var(--muted); font-size: 11.5px; line-height: 1.1; font-style: normal; font-weight: 500; font-variant-numeric: tabular-nums; }
+.latency-target-grid .latency-target-loss { display: flex; align-items: center; gap: 4px; }
+.latency-target-loss .packet-loss-icon { width: 1.1em; height: 1.1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.latency-target-loss[data-tone='warning'] .packet-loss-icon { color: var(--metric-orange); }
+.latency-target-loss[data-tone='danger'] .packet-loss-icon { color: var(--metric-red); }
 
 .latency-panel {
   margin: 0;
@@ -1545,9 +1594,9 @@ svg { display: block; }
   .latency-target-grid button[data-mobile-corners~='top-right'] { border-top-right-radius: var(--latency-grid-inner-radius); }
   .latency-target-grid button[data-mobile-corners~='bottom-left'] { border-bottom-left-radius: var(--latency-grid-inner-radius); }
   .latency-target-grid button[data-mobile-corners~='bottom-right'] { border-bottom-right-radius: var(--latency-grid-inner-radius); }
-  .latency-target-grid span { max-width: 100%; font-size: 10px; }
+  .latency-target-grid span { max-width: 100%; font-size: 11px; }
   .latency-target-grid strong { font-size: 15px; }
-  .latency-target-grid em { font-size: 9px; }
+  .latency-target-grid em { font-size: 10.5px; }
   .latency-panel { margin: 0; padding: 14px 8px 18px; }
   .latency-panel__header { align-items: flex-start; flex-direction: column; gap: 8px; }
   .latency-chart .axis-label { font-size: 10px; }
@@ -1570,5 +1619,6 @@ svg { display: block; }
   .home-summary__metric--rate { gap: 4px; padding-inline: 3px; }
   .home-summary__metric--rate > .home-summary__metric-label { width: calc(2em + 23px); }
   .home-summary__metric--rate .home-summary__metric-value { gap: 3px; }
+  .home-summary__metric--total .home-summary__metric-value { gap: 3px; }
   .home-summary__metric-value { gap: 2px; }
 }

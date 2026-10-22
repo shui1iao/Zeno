@@ -2,7 +2,6 @@ export type DashboardRoute =
   | { kind: 'home' }
   | { kind: 'admin' }
   | { kind: 'node'; nodeId: string }
-  | { kind: 'service'; targetId: string }
 
 function decodeRouteSegment(value: string): string | null {
   try {
@@ -26,12 +25,6 @@ export function parseDashboardRoute(pathname: string): DashboardRoute {
   if (match) {
     const nodeId = decodeRouteSegment(match[1])
     return nodeId === null ? { kind: 'home' } : { kind: 'node', nodeId }
-  }
-
-  const serviceMatch = normalized.match(/^\/service\/([^/]+)\/?$/)
-  if (serviceMatch) {
-    const targetId = decodeRouteSegment(serviceMatch[1])
-    return targetId === null ? { kind: 'home' } : { kind: 'service', targetId }
   }
 
   return { kind: 'home' }

@@ -166,25 +166,6 @@ var latencyGridByNode = latencyGridDimension{
 	sampleRollupFilter: "rollup_rows.node_id = ? AND rollup_rows.target_id = grid.series_id",
 }
 
-var latencyGridByTarget = latencyGridDimension{
-	filterColumn: "target_id",
-	seriesColumn: "node_id",
-	extraJoins: `
-		JOIN nodes n ON n.id = measurements.node_id`,
-	extraFilter: `
-		  AND n.disabled = 0`,
-	seriesQuery: `
-		SELECT n.id AS series_id, n.display_name AS series_name,
-		       ROW_NUMBER() OVER (ORDER BY n.display_order ASC, n.display_name ASC, n.id ASC) AS series_order
-		FROM nodes n
-		LEFT JOIN node_probe_targets npt ON npt.node_id = n.id AND npt.target_id = ?
-		WHERE n.disabled = 0 AND COALESCE(npt.enabled, 0) = 1
-		ORDER BY n.display_order ASC, n.display_name ASC, n.id ASC
-	`,
-	sampleRoundFilter:  "rounds.node_id = grid.series_id AND rounds.target_id = ?",
-	sampleRollupFilter: "rollup_rows.node_id = grid.series_id AND rollup_rows.target_id = ?",
-}
-
 func latencyGridSampleQuery(dimension latencyGridDimension) string {
 	return `
 		WITH RECURSIVE buckets(bucket_ts, sample_index) AS (
@@ -391,16 +372,8 @@ func (s *sqliteLatencyQueries) latencyGridPoints(ctx context.Context, nodeID str
 	return latencyGridPointsFor(ctx, s, nodeID, window, latencyGridByNode, latencyPointFromGridValue)
 }
 
-func (s *sqliteLatencyQueries) serviceLatencyGridPoints(ctx context.Context, targetID string, window latencyWindow) ([]ServiceLatencyPoint, error) {
-	return latencyGridPointsFor(ctx, s, targetID, window, latencyGridByTarget, serviceLatencyPointFromGridValue)
-}
-
 func latencyPointFromGridValue(point latencyGridPointValue) LatencyPoint {
 	return LatencyPoint{TS: point.TS, TargetID: point.Series.ID, TargetName: point.Series.Name, MedianMS: point.MedianMS, AvgMS: point.AvgMS, LossPercent: point.LossPercent}
-}
-
-func serviceLatencyPointFromGridValue(point latencyGridPointValue) ServiceLatencyPoint {
-	return ServiceLatencyPoint{TS: point.TS, NodeID: point.Series.ID, NodeName: point.Series.Name, MedianMS: point.MedianMS, AvgMS: point.AvgMS, LossPercent: point.LossPercent}
 }
 
 func (s *sqliteLatencyQueries) latencyGridSeries(ctx context.Context, query, id string) ([]latencyGridTarget, error) {

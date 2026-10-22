@@ -113,24 +113,6 @@ export interface ApiServiceTarget {
   updated_at?: string
 }
 
-export interface ApiServiceLatencyPoint {
-  ts: string
-  node_id: string
-  node_name: string
-  median_ms: number | null
-  avg_ms?: number | null
-  loss_percent: number
-}
-
-export interface ApiServiceLatencySeries {
-  node_id: string
-  node_name: string
-  created_at?: number[] | null
-  median_ms?: Array<number | null> | null
-  avg_ms?: Array<number | null> | null
-  loss_percent?: number[] | null
-}
-
 export interface ApiStatePoint {
   ts: string
   cpu_percent: number | null
@@ -292,14 +274,6 @@ export interface ApiLatencyResponse {
   series?: ApiLatencySeries[] | null
 }
 
-export interface ApiServiceLatencyResponse {
-  target: ApiServiceTarget
-  range: string
-  created_at?: number[] | null
-  points?: ApiServiceLatencyPoint[] | null
-  series?: ApiServiceLatencySeries[] | null
-}
-
 export interface ApiStateResponse {
   node_id: string
   range: string
@@ -362,12 +336,6 @@ export interface NodeLatencyData {
   range: string
   points: LatencyPoint[]
   snapshotKey?: string
-}
-
-export interface ServiceLatencyData {
-  target: ServiceTarget
-  range: string
-  points: LatencyPoint[]
 }
 
 export interface NodeStateData {

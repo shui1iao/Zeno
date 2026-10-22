@@ -162,6 +162,7 @@
   margin-bottom: 14px;
 }
 .admin-section-heading .eyebrow { display: none; }
+.admin-section-heading h3 { margin-bottom: 0; }
 .admin-section-actions { display: inline-flex; align-items: center; gap: 8px; }
 .admin-node-status {
   flex: none;
@@ -227,9 +228,13 @@
 }
 .admin-list-head > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-list-head > span:last-child { justify-self: end; text-align: right; }
-.admin-alert-rule-list .admin-list-head,
-.admin-alert-rule-list .admin-list-row {
-  grid-template-columns: minmax(180px, 1.2fr) minmax(84px, .55fr) auto;
+/* Desktop table layout: the name column stays left; every other column (header
+   and cell) is centred so header and content share one centre line. */
+@media (min-width: 768px) {
+  .admin-list-head > span:not(:first-child) { justify-self: stretch; text-align: center; }
+  .admin-list-row > :not(:first-child) { justify-self: center; text-align: center; }
+  .admin-list-row > .admin-ip-stack { align-items: center; }
+  .admin-list-row > .admin-row-actions { justify-content: center; }
 }
 .admin-list-head {
   position: sticky;
@@ -293,25 +298,23 @@
 .admin-node-section .admin-list-row {
   grid-template-columns: minmax(190px, 1.18fr) minmax(230px, 1.12fr) minmax(120px, 120px) minmax(84px, auto);
 }
-.admin-node-section .admin-list-head > span:nth-child(3),
-.admin-node-section .admin-list-row > span[data-label="Agent 版本"] { justify-self: start; text-align: left; }
 .admin-target-list .admin-list-head,
 .admin-target-list .admin-list-row {
-  grid-template-columns: minmax(170px, 1.12fr) minmax(170px, 1fr) minmax(120px, .72fr) auto;
+  /* Fixed action column: header and rows are separate grids, so an "auto"
+     track would size differently in each and break centre alignment. */
+  grid-template-columns: minmax(170px, 1.12fr) minmax(170px, 1fr) minmax(120px, .72fr) minmax(96px, 120px);
 }
 .admin-notification-list .admin-list-head,
-.admin-notification-list .admin-list-row {
-  grid-template-columns: minmax(180px, 1fr) minmax(86px, .42fr) minmax(180px, auto);
+.admin-notification-list .admin-list-row,
+.admin-alert-rule-list .admin-list-head,
+.admin-alert-rule-list .admin-list-row {
+  /* Same three columns in both notification tables so 状态 and 操作 line up. */
+  grid-template-columns: minmax(180px, 1fr) minmax(96px, 140px) minmax(96px, 120px);
 }
-.admin-notification-list .admin-list-head > span:nth-child(2),
-.admin-alert-rule-list .admin-list-head > span:nth-child(2) { justify-self: start; text-align: left; }
 .admin-notification-list .admin-row-actions.admin-icon-actions {
-  justify-content: flex-start;
   flex-wrap: wrap;
   gap: 5px;
 }
-.admin-notification-list .admin-row-action { height: 30px; padding: 0 10px; font-size: 12px; }
-.admin-notification-list .admin-row-action.is-icon { width: 30px; padding: 0; }
 .admin-ip-stack {
   min-height: 38px;
   display: flex;
@@ -726,9 +729,9 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 12%, transparent);
 }
 .admin-date-permanent.is-active {
-  background: color-mix(in srgb, var(--green) 12%, transparent);
-  border-color: color-mix(in srgb, var(--green) 54%, var(--border));
-  color: var(--green);
+  border-color: var(--control-selected-border);
+  background: var(--control-selected-background);
+  color: var(--control-selected-foreground);
 }
 .admin-date-permanent:disabled { opacity: .56; cursor: not-allowed; }
 .admin-select-menu-field { position: relative; }
@@ -1250,7 +1253,8 @@
 }
 .admin-modal .admin-node-edit-form { margin-top: 14px; }
 .admin-modal .admin-node-edit-form.is-sectioned { margin-top: 0; }
-.admin-modal .admin-node-edit-form.is-sectioned > .admin-form-section:first-child {
+.admin-modal .admin-node-edit-form.is-sectioned > .admin-form-section:first-child,
+.admin-modal .admin-modal-scroll > .admin-form-section:first-child {
   margin-top: 0;
   padding-top: 14px;
   border-top: 0;
@@ -1259,6 +1263,8 @@
 .admin-modal .admin-target-create-form {
   margin: 14px 0 0;
 }
+/* Form sections scroll inside this wrapper on phones so the action footer stays visible. */
+.admin-modal-scroll { display: contents; }
 .admin-action-footer {
   grid-column: 1 / -1;
   position: static;
@@ -1459,6 +1465,10 @@
   .admin-modal-header { padding: 14px; }
   .admin-modal-header h3 { font-size: 20px; }
   .admin-modal-body { padding: 0 12px; overflow: auto; }
+  .admin-modal-body:has(> form > .admin-modal-scroll) { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; }
+  .admin-modal-body > form:has(> .admin-modal-scroll) { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .admin-modal-scroll { flex: 1 1 auto; min-height: 0; display: block; margin: 0 -12px; padding: 0 12px 2px; overflow-y: auto; overscroll-behavior: contain; }
+  .admin-modal-scroll + .admin-action-footer { flex: none; margin-top: 0; }
   .admin-modal.admin-delete-modal { height: auto; max-height: calc(100dvh - 16px); }
   .admin-delete-modal .admin-modal-header { padding: 10px 10px 8px 14px; }
   .admin-delete-modal .admin-modal-close { width: 44px; height: 44px; flex: 0 0 44px; }

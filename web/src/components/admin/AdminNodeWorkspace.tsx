@@ -155,47 +155,48 @@ function AdminNodeCreateModal({ onCreate, onInstallCommand, onClose }: { onCreat
   return (
     <AdminModal title="添加服务器" closeDisabled={submitting} onClose={onClose}>
       <form className="admin-node-create-form admin-node-edit-form is-sectioned" aria-label="添加服务器" aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
-        <AdminFormSection title="服务器名称">
-          <div className="admin-form-grid">
-            <label>
-              <span>服务器名称</span>
-              <input name="new-display-name" autoComplete="off" placeholder="New Server" disabled={Boolean(createdNode)} />
-            </label>
-          </div>
-        </AdminFormSection>
-        <AdminFormSection title="账单与流量">
-          <div className="admin-billing-grid">
-            <div className="admin-billing-row admin-billing-row--cycle">
-              <AdminDateField className="admin-billing-control admin-billing-control--expiry" name="new-expiry-date" label="到期日" permanentLabel="设为永久" disabled={Boolean(createdNode)} />
-              <label className="admin-billing-control admin-billing-control--amount">
-                <span>续费金额</span>
-                <input name="new-renewal-amount" type="number" min="0" max="1000000000" step="0.01" inputMode="decimal" disabled={Boolean(createdNode)} />
+        <div className="admin-modal-scroll">
+          <AdminFormSection title="服务器名称">
+            <div className="admin-form-grid">
+              <label className="admin-label-without-caption">
+                <input name="new-display-name" autoComplete="off" aria-label="服务器名称" disabled={Boolean(createdNode)} />
               </label>
-              <AdminSegmentedField className="admin-billing-control admin-billing-control--currency" name="new-renewal-currency" label="币种" defaultValue="CNY" options={renewalCurrencyOptions} disabled={Boolean(createdNode)} />
-              <AdminSegmentedField className="admin-billing-control admin-billing-control--cycle" name="new-billing-cycle" label="账单周期" defaultValue="月" options={billingCycleOptions} disabled={Boolean(createdNode)} />
             </div>
-            <div className="admin-billing-row admin-billing-row--traffic">
-              <label className="admin-billing-control admin-billing-control--reset">
-                <span>月流量重置日</span>
-                <input name="new-monthly-reset-day" type="number" min="1" max="31" step="1" defaultValue="1" disabled={Boolean(createdNode)} />
-              </label>
-              <AdminSegmentedField className="admin-billing-control admin-billing-control--mode" name="new-billing-mode" label="流量计费口径" defaultValue="both" options={billingModeOptions} disabled={Boolean(createdNode)} />
-              <label className="admin-billing-control admin-billing-control--quota">
-                <span>月配额</span>
-                <input name="new-monthly-quota" type="number" min="0" step="0.01" disabled={Boolean(createdNode)} />
-              </label>
-              <AdminSegmentedField className="admin-billing-control admin-billing-control--unit" name="new-monthly-quota-unit" label="配额单位" defaultValue="GB" options={quotaUnitOptions} disabled={Boolean(createdNode)} />
+          </AdminFormSection>
+          <AdminFormSection title="账单与流量">
+            <div className="admin-billing-grid">
+              <div className="admin-billing-row admin-billing-row--cycle">
+                <AdminDateField className="admin-billing-control admin-billing-control--expiry" name="new-expiry-date" label="到期日" permanentLabel="设为永久" disabled={Boolean(createdNode)} />
+                <label className="admin-billing-control admin-billing-control--amount">
+                  <span>续费金额</span>
+                  <input name="new-renewal-amount" type="number" min="0" max="1000000000" step="0.01" inputMode="decimal" disabled={Boolean(createdNode)} />
+                </label>
+                <AdminSegmentedField className="admin-billing-control admin-billing-control--currency" name="new-renewal-currency" label="币种" defaultValue="CNY" options={renewalCurrencyOptions} disabled={Boolean(createdNode)} />
+                <AdminSegmentedField className="admin-billing-control admin-billing-control--cycle" name="new-billing-cycle" label="账单周期" defaultValue="月" options={billingCycleOptions} disabled={Boolean(createdNode)} />
+              </div>
+              <div className="admin-billing-row admin-billing-row--traffic">
+                <label className="admin-billing-control admin-billing-control--reset">
+                  <span>月流量重置日</span>
+                  <input name="new-monthly-reset-day" type="number" min="1" max="31" step="1" defaultValue="1" disabled={Boolean(createdNode)} />
+                </label>
+                <AdminSegmentedField className="admin-billing-control admin-billing-control--mode" name="new-billing-mode" label="流量计费口径" defaultValue="both" options={billingModeOptions} disabled={Boolean(createdNode)} />
+                <label className="admin-billing-control admin-billing-control--quota">
+                  <span>月配额</span>
+                  <input name="new-monthly-quota" type="number" min="0" step="0.01" disabled={Boolean(createdNode)} />
+                </label>
+                <AdminSegmentedField className="admin-billing-control admin-billing-control--unit" name="new-monthly-quota-unit" label="配额单位" defaultValue="GB" options={quotaUnitOptions} disabled={Boolean(createdNode)} />
+              </div>
             </div>
-          </div>
-        </AdminFormSection>
-        {createdNode && (
-          <AdminInstallCommand
-            nodeId={createdNode.id}
-            initialMessage={<>已添加：{createdNode.displayName}</>}
-            blocked={submitting}
-            onInstallCommand={onInstallCommand}
-          />
-        )}
+          </AdminFormSection>
+          {createdNode && (
+            <AdminInstallCommand
+              nodeId={createdNode.id}
+              initialMessage={<>已添加：{createdNode.displayName}</>}
+              blocked={submitting}
+              onInstallCommand={onInstallCommand}
+            />
+          )}
+        </div>
         <AdminActionFooter error={formError}>
           <button type="submit" disabled={submitting || Boolean(createdNode)}>{submitting ? '添加中…' : createdNode ? '服务器已添加' : '添加服务器'}</button>
         </AdminActionFooter>
@@ -248,65 +249,67 @@ function AdminNodeEditModal({ node, targets, onUpdate, onInstallCommand, onClose
   return (
     <AdminModal title="编辑服务器" closeDisabled={submitting} onClose={onClose}>
       <form className="admin-node-edit-form is-sectioned" aria-label={`${node.displayName} 节点编辑`} aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
-        <AdminFormSection title="服务器名称">
-          <div className="admin-form-grid">
-            <label className="admin-label-without-caption">
-              <input name="display-name" defaultValue={node.displayName} autoComplete="off" aria-label="服务器名称" />
-            </label>
-          </div>
-        </AdminFormSection>
-        <AdminFormSection title="关联延迟监控">
-          {sortedTargets.length === 0 ? (
-            <div className="admin-state-card is-compact">暂无延迟监控。</div>
-          ) : (
-            <AdminExpandedCheckList
-              title="已选延迟监控"
-              panelLabel="选择监控服务"
-              emptyText="暂无延迟监控"
-              options={sortedTargets.map((target) => ({ value: target.id, label: target.name }))}
-              value={selectedTargetIds}
-              onChange={updateSelectedTargetIds}
-              renderRight={(option) => (
-                <label className="admin-home-monitor-radio">
-                  <input
-                    type="radio"
-                    name={`home-monitor-${node.id}`}
-                    aria-label={`首页展示 ${option.label}`}
-                    checked={homeTargetId === option.value}
-                    onChange={() => setHomeTargetId(option.value)}
-                  />
-                  <span>首页展示</span>
+        <div className="admin-modal-scroll">
+          <AdminFormSection title="服务器名称">
+            <div className="admin-form-grid">
+              <label className="admin-label-without-caption">
+                <input name="display-name" defaultValue={node.displayName} autoComplete="off" aria-label="服务器名称" />
+              </label>
+            </div>
+          </AdminFormSection>
+          <AdminFormSection title="关联延迟监控">
+            {sortedTargets.length === 0 ? (
+              <div className="admin-state-card is-compact">暂无延迟监控。</div>
+            ) : (
+              <AdminExpandedCheckList
+                title="已选延迟监控"
+                panelLabel="选择监控服务"
+                emptyText="暂无延迟监控"
+                options={sortedTargets.map((target) => ({ value: target.id, label: target.name }))}
+                value={selectedTargetIds}
+                onChange={updateSelectedTargetIds}
+                renderRight={(option) => (
+                  <label className="admin-home-monitor-radio">
+                    <input
+                      type="radio"
+                      name={`home-monitor-${node.id}`}
+                      aria-label={`首页展示 ${option.label}`}
+                      checked={homeTargetId === option.value}
+                      onChange={() => setHomeTargetId(option.value)}
+                    />
+                    <span>首页展示</span>
+                  </label>
+                )}
+              />
+            )}
+          </AdminFormSection>
+          <AdminFormSection title="账单与流量">
+            <div className="admin-billing-grid">
+              <div className="admin-billing-row admin-billing-row--cycle">
+                <AdminDateField className="admin-billing-control admin-billing-control--expiry" name="expiry-date" label="到期日" defaultValue={node.expiryDate ?? ''} defaultPermanent={node.expiryPermanent} permanentLabel="设为永久" />
+                <label className="admin-billing-control admin-billing-control--amount">
+                  <span>续费金额</span>
+                  <input name="renewal-amount" type="number" min="0" max="1000000000" step="0.01" inputMode="decimal" defaultValue={formatRenewalAmountInput(node.renewalAmount)} />
                 </label>
-              )}
-            />
-          )}
-        </AdminFormSection>
-        <AdminFormSection title="账单与流量">
-          <div className="admin-billing-grid">
-            <div className="admin-billing-row admin-billing-row--cycle">
-              <AdminDateField className="admin-billing-control admin-billing-control--expiry" name="expiry-date" label="到期日" defaultValue={node.expiryDate ?? ''} defaultPermanent={node.expiryPermanent} permanentLabel="设为永久" />
-              <label className="admin-billing-control admin-billing-control--amount">
-                <span>续费金额</span>
-                <input name="renewal-amount" type="number" min="0" max="1000000000" step="0.01" inputMode="decimal" defaultValue={formatRenewalAmountInput(node.renewalAmount)} />
-              </label>
-              <AdminSegmentedField className="admin-billing-control admin-billing-control--currency" name="renewal-currency" label="币种" defaultValue={node.renewalCurrency || 'CNY'} options={renewalCurrencyOptions} />
-              <AdminSegmentedField className="admin-billing-control admin-billing-control--cycle" name="billing-cycle" label="账单周期" defaultValue={normalizeBillingCycle(node.billingCycle)} options={billingCycleOptions} />
+                <AdminSegmentedField className="admin-billing-control admin-billing-control--currency" name="renewal-currency" label="币种" defaultValue={node.renewalCurrency || 'CNY'} options={renewalCurrencyOptions} />
+                <AdminSegmentedField className="admin-billing-control admin-billing-control--cycle" name="billing-cycle" label="账单周期" defaultValue={normalizeBillingCycle(node.billingCycle)} options={billingCycleOptions} />
+              </div>
+              <div className="admin-billing-row admin-billing-row--traffic">
+                <label className="admin-billing-control admin-billing-control--reset">
+                  <span>月流量重置日</span>
+                  <input name="monthly-reset-day" type="number" min="1" max="31" step="1" defaultValue={node.monthlyResetDay || 1} />
+                </label>
+                <AdminSegmentedField className="admin-billing-control admin-billing-control--mode" name="billing-mode" label="流量计费口径" defaultValue={node.billingMode || 'both'} options={billingModeOptions} />
+                <label className="admin-billing-control admin-billing-control--quota">
+                  <span>月配额</span>
+                  <input name="monthly-quota" type="number" min="0" step="0.01" defaultValue={formatQuotaValue(node.monthlyQuotaBytes)} />
+                </label>
+                <AdminSegmentedField className="admin-billing-control admin-billing-control--unit" name="monthly-quota-unit" label="配额单位" defaultValue={quotaUnitForBytes(node.monthlyQuotaBytes)} options={quotaUnitOptions} />
+              </div>
             </div>
-            <div className="admin-billing-row admin-billing-row--traffic">
-              <label className="admin-billing-control admin-billing-control--reset">
-                <span>月流量重置日</span>
-                <input name="monthly-reset-day" type="number" min="1" max="31" step="1" defaultValue={node.monthlyResetDay || 1} />
-              </label>
-              <AdminSegmentedField className="admin-billing-control admin-billing-control--mode" name="billing-mode" label="流量计费口径" defaultValue={node.billingMode || 'both'} options={billingModeOptions} />
-              <label className="admin-billing-control admin-billing-control--quota">
-                <span>月配额</span>
-                <input name="monthly-quota" type="number" min="0" step="0.01" defaultValue={formatQuotaValue(node.monthlyQuotaBytes)} />
-              </label>
-              <AdminSegmentedField className="admin-billing-control admin-billing-control--unit" name="monthly-quota-unit" label="配额单位" defaultValue={quotaUnitForBytes(node.monthlyQuotaBytes)} options={quotaUnitOptions} />
-            </div>
-          </div>
-        </AdminFormSection>
-        <AdminInstallCommand nodeId={node.id} onInstallCommand={onInstallCommand} />
+          </AdminFormSection>
+          <AdminInstallCommand nodeId={node.id} onInstallCommand={onInstallCommand} />
+        </div>
         <AdminActionFooter error={formError}>
           <button type="submit" disabled={submitting}>{submitting ? '保存中…' : '保存服务器'}</button>
         </AdminActionFooter>

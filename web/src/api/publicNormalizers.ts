@@ -1,6 +1,6 @@
 import type { AdminSettings, HomeCardNode, LatencyPoint, ServiceTarget, StatePoint } from '../types'
 import { normalizeCurrencyRates } from '../lib/currency'
-import type { ApiLatencyPoint, ApiLatencyResponse, ApiLatencySeries, ApiLatencySummary, ApiNode, ApiServiceLatencyPoint, ApiServiceLatencyResponse, ApiServiceLatencySeries, ApiServiceTarget, ApiSettings, ApiStatePoint, ApiStateResponse, NodeLatencyData, NodeStateData, ServiceLatencyData, SummaryData, ApiSummaryResponse } from './apiTypes'
+import type { ApiLatencyPoint, ApiLatencyResponse, ApiLatencySeries, ApiLatencySummary, ApiNode, ApiServiceTarget, ApiSettings, ApiStatePoint, ApiStateResponse, NodeLatencyData, NodeStateData, SummaryData, ApiSummaryResponse } from './apiTypes'
 
 export function normalizeSettings(input: ApiSettings): AdminSettings {
   const logoUrl = input.logo_url
@@ -106,14 +106,6 @@ export function nodeLatencySnapshotKey(input: ApiLatencyResponse): string {
     }
   }
   return `${(hash.first >>> 0).toString(36)}:${(hash.second >>> 0).toString(36)}`
-}
-
-export function normalizeServiceLatency(input: ApiServiceLatencyResponse): ServiceLatencyData {
-  return {
-    target: normalizeServiceTarget(input.target),
-    range: input.range,
-    points: normalizeServiceLatencyPoints(input),
-  }
 }
 
 export function normalizeNodeState(input: ApiStateResponse): NodeStateData {
@@ -234,14 +226,6 @@ function normalizeLatencySeries<T extends ApiLatencySeriesValues>(
   })
 }
 
-export function normalizeServiceLatencyPoints(input: ApiServiceLatencyResponse): LatencyPoint[] {
-  if (input.points) return input.points.map(normalizeServiceLatencyPoint)
-  return normalizeLatencySeries<ApiServiceLatencySeries>(input.series, input.created_at ?? [], (series) => ({
-    targetId: series.node_id,
-    targetName: series.node_name,
-  }))
-}
-
 function normalizeSeriesTimestampValue(value: number): number {
   const timestamp = new Date(value).getTime()
   return Number.isNaN(timestamp) ? 0 : timestamp
@@ -262,17 +246,6 @@ export function normalizeServiceTarget(target: ApiServiceTarget): ServiceTarget 
     avgMs: target.avg_ms ?? null,
     lossPercent: target.loss_percent,
     updatedAt: target.updated_at,
-  }
-}
-
-export function normalizeServiceLatencyPoint(point: ApiServiceLatencyPoint): LatencyPoint {
-  return {
-    ts: point.ts,
-    targetId: point.node_id,
-    targetName: point.node_name,
-    medianMs: point.median_ms,
-    avgMs: point.avg_ms ?? null,
-    lossPercent: point.loss_percent,
   }
 }
 

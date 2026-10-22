@@ -346,39 +346,7 @@ Controller 对下发给单个节点的探针配置做资源上限：最多 32 �
 
 `net_in_total_bytes` / `net_out_total_bytes` 保留 Agent 当前网卡 counter，供节点详情和状态历史使用，服务器重启后可能归零。`net_in_lifetime_bytes` / `net_out_lifetime_bytes` 由 Controller 持久化累计：首次有效样本保留当时 counter，之后按 counter delta 累计；服务器、Agent 或网卡重启使 counter 降低时，重置后的较小 counter 会作为重置后已产生的流量计入永久累计，并成为下一次采样的基线。首页顶部“接收 / 发送”使用 lifetime 字段；旧缓存缺少字段时临时回退到 raw counter。
 
-`services` 是公开服务详情页使用的探针目标摘要。它按后台探针目标显示顺序返回有效目标，`assigned_node_count` 是分配且启用的节点数量，`reporting_node_count` 是最近 24 小时内有上报的节点数量，延迟/丢包取该服务最新一条探测结果；公开 DTO 不返回探测地址或端口，完整端点只在管理员接口中可见；前台首页不单独展示监控服务列表。
-
-### GET /api/public/v1/services/{target_id}/latency
-
-查询某个监控服务在所有节点上的历史延迟。前端把每个节点作为一条曲线，用于服务详情页。`range` 支持 `1h`、`1d`、`7d`、`30d`；未登录前台只提供 `1h` / `1d`，登录后才显示 `7d` / `30d`。若后端对长范围返回 401，前端会清除内存中的登录状态并提示重新登录。
-
-```json
-{
-  "target": {
-    "id": "google",
-    "name": "Google",
-    "type": "http_get",
-    "assigned_node_count": 10,
-    "reporting_node_count": 9,
-    "median_ms": 1.2,
-    "loss_percent": 0,
-    "updated_at": "2026-07-04T12:00:00Z"
-  },
-  "range": "1d",
-  "created_at": [1783166400000],
-  "series": [
-    {
-      "node_id": "example-node-a",
-      "node_name": "Example Node A",
-      "median_ms": [1.2],
-      "avg_ms": [1.3],
-      "loss_percent": [0]
-    }
-  ]
-}
-```
-
-历史响应使用紧凑列式格式：`created_at` 是 Unix 毫秒时间数组，`median_ms`、`avg_ms` 与 `loss_percent` 按索引对齐。所有曲线时间轴一致时 `created_at` 位于响应顶层；时间轴不一致时，每个 `series` 项携带自己的 `created_at`。
+`services` 是公开 summary 中的探针目标摘要，服务器详情页用它的顺序为延迟曲线取色。它按后台探针目标显示顺序返回有效目标，`assigned_node_count` 是分配且启用的节点数量，`reporting_node_count` 是最近 24 小时内有上报的节点数量，延迟/丢包取该服务最新一条探测结果；公开 DTO 不返回探测地址或端口，完整端点只在管理员接口中可见；前台首页不单独展示监控服务列表。
 
 ### GET /api/public/v1/nodes/{node_id}/latency
 

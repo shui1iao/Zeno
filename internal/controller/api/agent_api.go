@@ -55,9 +55,8 @@ type preparedAgentProbeRound struct {
 }
 
 type agentProbeInsertResult struct {
-	inserted          int
-	idempotent        int
-	insertedTargetIDs []string
+	inserted   int
+	idempotent int
 }
 
 var (
@@ -184,11 +183,6 @@ func (h *handler) handleAgentProbeResults(w http.ResponseWriter, r *http.Request
 		h.markSummaryCacheDirty()
 		h.publishSummary(r.Context())
 		h.scheduleNodeLatencyPublish(nodeID)
-		for _, targetID := range insertResult.insertedTargetIDs {
-			if targetID != "" {
-				h.scheduleServiceLatencyPublish(targetID)
-			}
-		}
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"ok":         true,

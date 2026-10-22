@@ -162,7 +162,6 @@ func (s *sqliteAgentDomain) insertAgentProbeResultsOnce(ctx context.Context, nod
 			return agentProbeInsertResult{}, err
 		}
 		result.inserted++
-		result.insertedTargetIDs = append(result.insertedTargetIDs, resolved.target.ID)
 	}
 	if err := tx.Commit(); err != nil {
 		return agentProbeInsertResult{}, err

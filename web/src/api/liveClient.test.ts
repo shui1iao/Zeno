@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { subscribeNodeLatency, subscribeNodeState, subscribeServiceLatency, subscribeSummary } from './client'
+import { subscribeNodeLatency, subscribeNodeState, subscribeSummary } from './client'
 
 describe('subscribeSummary', () => {
   const originalWebSocket = globalThis.WebSocket
@@ -120,7 +120,7 @@ describe('detail websocket subscriptions', () => {
     vi.restoreAllMocks()
   })
 
-  it('opens node state, node latency, and service latency websocket endpoints', () => {
+  it('opens node state and node latency websocket endpoints', () => {
     const instances: any[] = []
     class FakeWebSocket {
       url: string
@@ -140,29 +140,23 @@ describe('detail websocket subscriptions', () => {
 
     const onNodeLatency = vi.fn()
     const onNodeState = vi.fn()
-    const onServiceLatency = vi.fn()
     const stopNodeLatency = subscribeNodeLatency('example-node-a', '1d', onNodeLatency)
     const stopNodeState = subscribeNodeState('example-node-a', '1h', onNodeState)
-    const stopServiceLatency = subscribeServiceLatency('google', '7d', onServiceLatency)
 
     expect(new URL(instances[0].url).pathname).toBe('/api/public/v1/nodes/example-node-a/latency/ws')
     expect(new URL(instances[0].url).searchParams.get('range')).toBe('1d')
     expect(new URL(instances[1].url).pathname).toBe('/api/public/v1/nodes/example-node-a/state/ws')
     expect(new URL(instances[1].url).searchParams.get('range')).toBe('1h')
-    expect(new URL(instances[2].url).pathname).toBe('/api/public/v1/services/google/latency/ws')
-    expect(new URL(instances[2].url).searchParams.get('range')).toBe('7d')
 
     instances[0].emit({ node_id: 'example-node-a', range: '1d', points: [{ ts: '2026-07-05T07:00:00Z', target_id: 'google', target_name: 'Google', median_ms: 1.2, loss_percent: 0 }] })
     instances[1].emit({ node_id: 'example-node-a', range: '1h', points: [{ ts: '2026-07-05T07:00:00Z', cpu_percent: 12, load1: 0.1, load5: 0.2, load15: 0.3, memory_used_bytes: 100, memory_total_bytes: 200, swap_used_bytes: 0, swap_total_bytes: 0, disk_used_bytes: 300, disk_total_bytes: 400, net_in_total_bytes: 500, net_out_total_bytes: 600, net_in_speed_bps: 700, net_out_speed_bps: 800, process_count: 90, tcp_connection_count: 10, udp_connection_count: 5, uptime_seconds: 60 }] })
-    instances[2].emit({ target: { id: 'google', name: 'Google', type: 'http_get', assigned_node_count: 1, reporting_node_count: 1, median_ms: 1.2, loss_percent: 0, updated_at: '2026-07-05T07:00:00Z' }, range: '7d', points: [{ ts: '2026-07-05T07:00:00Z', node_id: 'example-node-a', node_name: 'Example Node A', median_ms: 1.3, loss_percent: 0 }] })
 
     expect(onNodeLatency).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'example-node-a', range: '1d' }))
     expect(onNodeState).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 'example-node-a', range: '1h', points: [expect.objectContaining({ netOutSpeedBps: 800 })] }))
-    expect(onServiceLatency).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ id: 'google' }), range: '7d' }))
 
     stopNodeLatency?.()
     stopNodeState?.()
-    stopServiceLatency?.()
+    expect(instances).toHaveLength(2)
     expect(instances.every((instance) => instance.close.mock.calls.length === 1)).toBe(true)
   })
 })

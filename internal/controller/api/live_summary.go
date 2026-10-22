@@ -101,10 +101,6 @@ func nodeLatencyLiveTopic(nodeID, rangeName string) string {
 	return "node-latency:" + nodeID + ":" + rangeName
 }
 
-func serviceLatencyLiveTopic(targetID, rangeName string) string {
-	return "service-latency:" + targetID + ":" + rangeName
-}
-
 func liveWindowNames() []string {
 	return []string{"1h", "1d", "7d", "30d"}
 }
@@ -401,20 +397,12 @@ func (h *handler) nodeLatencyJSON(ctx context.Context, nodeID string, window lat
 	return cachedDetailJSON(h, ctx, nodeLatencyLiveTopic(nodeID, window.Name), nodeID, window, h.store.NodeLatency)
 }
 
-func (h *handler) serviceLatencyJSON(ctx context.Context, targetID string, window latencyWindow) ([]byte, error) {
-	return cachedDetailJSON(h, ctx, serviceLatencyLiveTopic(targetID, window.Name), targetID, window, h.store.ServiceTargetLatency)
-}
-
 func (h *handler) scheduleNodeStatePublish(nodeID string) {
 	h.scheduleDetailFor(nodeID, "node-state:", nodeStateLiveTopic, h.publishNodeState)
 }
 
 func (h *handler) scheduleNodeLatencyPublish(nodeID string) {
 	h.scheduleDetailFor(nodeID, "node-latency:", nodeLatencyLiveTopic, h.publishNodeLatency)
-}
-
-func (h *handler) scheduleServiceLatencyPublish(targetID string) {
-	h.scheduleDetailFor(targetID, "service-latency:", serviceLatencyLiveTopic, h.publishServiceLatency)
 }
 
 func (h *handler) scheduleDetailFor(subjectID, keyPrefix string, topicFor func(string, string) string, publish func(context.Context, string)) {
@@ -534,10 +522,6 @@ func (h *handler) publishNodeState(ctx context.Context, nodeID string) {
 
 func (h *handler) publishNodeLatency(ctx context.Context, nodeID string) {
 	publishDetail(h, ctx, nodeID, resolveLatencyWindow, nodeLatencyLiveTopic, h.store.NodeLatency)
-}
-
-func (h *handler) publishServiceLatency(ctx context.Context, targetID string) {
-	publishDetail(h, ctx, targetID, resolveLatencyWindow, serviceLatencyLiveTopic, h.store.ServiceTargetLatency)
 }
 
 func publishDetail[T any](

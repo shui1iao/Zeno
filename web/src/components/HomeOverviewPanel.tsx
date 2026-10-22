@@ -22,6 +22,16 @@ function compactRateParts(value: number): { value: string; unit: string } {
   return { value: amount, unit: `${unit}/s` }
 }
 
+// Cumulative totals always show two decimals so that the two counters line up.
+function totalBytesParts(value: number): { value: string; unit: string } {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  if (!Number.isFinite(value) || value <= 0) return { value: '0', unit: 'B' }
+  let size = value
+  let unit = 0
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1 }
+  return { value: unit === 0 ? size.toFixed(0) : size.toFixed(2), unit: units[unit] }
+}
+
 interface HomeOverviewPanelProps {
   settings?: AdminSettings
   totalCount: number
@@ -127,7 +137,7 @@ interface HomeTrafficSummaryProps {
   direction: 'upload' | 'download'
   kind: 'rate' | 'total'
   rate: ReturnType<typeof compactRateParts>
-  total: string
+  total: ReturnType<typeof totalBytesParts>
 }
 
 function HomeTrafficSummary({ direction, kind, rate, total }: HomeTrafficSummaryProps) {
@@ -153,7 +163,8 @@ function HomeTrafficSummary({ direction, kind, rate, total }: HomeTrafficSummary
         <span>{isUpload ? '累计发送' : '累计接收'}</span>
       </div>
       <div className="home-summary__metric-value home-summary__metric-value--total">
-        <strong>{total}</strong>
+        <strong>{total.value}</strong>
+        <span>{total.unit}</span>
       </div>
     </div>
   )
@@ -343,10 +354,10 @@ export function HomeOverviewPanel({ totalCount, onlineCount, monthlyCost, displa
           <strong>{formatCurrencyAmount(monthlyCost, activeCurrency, { fixed: true, spaced: true })}</strong>
         </div>
       </div>
-      <HomeTrafficSummary direction="upload" kind="total" rate={uploadRate} total={compactBytes(totalUp)} />
-      <HomeTrafficSummary direction="download" kind="total" rate={downloadRate} total={compactBytes(totalDown)} />
-      <HomeTrafficSummary direction="upload" kind="rate" rate={uploadRate} total={compactBytes(totalUp)} />
-      <HomeTrafficSummary direction="download" kind="rate" rate={downloadRate} total={compactBytes(totalDown)} />
+      <HomeTrafficSummary direction="upload" kind="total" rate={uploadRate} total={totalBytesParts(totalUp)} />
+      <HomeTrafficSummary direction="download" kind="total" rate={downloadRate} total={totalBytesParts(totalDown)} />
+      <HomeTrafficSummary direction="upload" kind="rate" rate={uploadRate} total={totalBytesParts(totalUp)} />
+      <HomeTrafficSummary direction="download" kind="rate" rate={downloadRate} total={totalBytesParts(totalDown)} />
     </section>
   )
 }

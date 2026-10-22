@@ -16,6 +16,10 @@
   border-top: 0;
 }
 .home-overview-card { height: 135px; }
+/* Tablet overview wraps to two rows of three; let the card follow its content. */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .home-overview-card { height: auto; }
+}
 .admin-chrome-card .admin-toolbar {
   flex: 0 0 auto;
   align-items: center;

@@ -158,18 +158,6 @@ func (s *sqliteMonitoringDomain) NodeLatency(ctx context.Context, nodeID string,
 	return LatencyResponse{NodeID: nodeID, Range: window.Name, Points: points}, nil
 }
 
-func (s *sqliteMonitoringDomain) ServiceTargetLatency(ctx context.Context, targetID string, window latencyWindow) (ServiceTargetLatencyResponse, error) {
-	target, err := s.serviceTargetByID(ctx, targetID)
-	if err != nil {
-		return ServiceTargetLatencyResponse{}, err
-	}
-	points, err := s.serviceLatencyPoints(ctx, targetID, window)
-	if err != nil {
-		return ServiceTargetLatencyResponse{}, err
-	}
-	return ServiceTargetLatencyResponse{Target: target, Range: window.Name, Points: points}, nil
-}
-
 func (s *sqliteMonitoringDomain) NodeState(ctx context.Context, nodeID string, window latencyWindow) (StateResponse, error) {
 	points, err := nodeWindowPoints(ctx, s, nodeID, window, s.statePoints)
 	if err != nil {

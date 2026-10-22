@@ -15,6 +15,7 @@ import type { AdminDashboardContainerProps } from './components/admin/AdminDashb
 import type { NodeDetailRouteProps } from './components/NodeDetailRoute'
 import type { DashboardRoute } from './lib/route'
 import { prefetchNodeLatency } from './api/publicClient'
+import { BackIcon } from './components/icons'
 
 export { applyCustomCode, extractSafeCustomCSS } from './lib/customCode'
 export { availableHistoryRanges, coerceHistoryRange, rangeRequiresAdmin } from './lib/historyRange'
@@ -30,7 +31,6 @@ const loadAdminDashboard = () => loadAdminDashboardModule().then((module) => ({ 
 const loadNodeDetailRouteModule = () => import('./components/NodeDetailRoute')
 const LazyAdminDashboard = lazy(loadAdminDashboard)
 const LazyNodeDetailRoute = lazy(() => loadNodeDetailRouteModule().then((module) => ({ default: module.NodeDetailRoute })))
-const LazyServiceDetailRoute = lazy(() => import('./components/ServiceDetailRoute').then((module) => ({ default: module.ServiceDetailRoute })))
 let preloadedAdminDashboard: ComponentType<AdminDashboardContainerProps> | null = null
 let preloadedNodeDetailRoute: ComponentType<NodeDetailRouteProps> | null = null
 let adminRoutePreload: Promise<void> | null = null
@@ -70,6 +70,7 @@ export function DashboardRouteState({
   onThemeChange,
   onBackgroundToggle,
   backgroundEnabled,
+  notFound = false,
 }: {
   settings: AdminSettings
   message: string
@@ -80,6 +81,8 @@ export function DashboardRouteState({
   onThemeChange: (theme: AdminTheme) => void
   onBackgroundToggle?: () => void
   backgroundEnabled: boolean
+  /** Not-found pages offer the same back control as the detail pages. */
+  notFound?: boolean
 }) {
   return (
     <div className="kulin-container route-state-container">
@@ -93,10 +96,24 @@ export function DashboardRouteState({
           onBackgroundToggle={onBackgroundToggle}
           backgroundEnabled={backgroundEnabled}
         />
+        {notFound && (
+          <div className="route-state-back">
+            <button className="route-state-back-button" type="button" onClick={onHome}>
+              <BackIcon />
+              <span>返回首页</span>
+            </button>
+          </div>
+        )}
         {message !== '' && <div className={`route-state-card${isError ? ' is-error' : ''}`}>{message}</div>}
       </section>
     </div>
   )
+}
+
+export function pageTitleForRoute(route: DashboardRoute, nodeName?: string): string | undefined {
+  if (route.kind === 'admin') return '后台'
+  if (route.kind === 'node') return nodeName ?? '未找到'
+  return undefined
 }
 
 function sum(values: Array<number | null | undefined>): number {
@@ -219,9 +236,12 @@ export function App() {
     }
   }, [route.kind, state.kind, adoptPreloadedNodeDetailRoute])
 
+  const routeNodeName = route.kind === 'node' && state.kind === 'ready' ? state.data.nodes.find((node) => node.id === route.nodeId)?.displayName : undefined
+  const loadingRoute = state.kind !== 'ready' && route.kind === 'node'
+  const pageTitle = loadingRoute ? undefined : pageTitleForRoute(route, routeNodeName)
   useEffect(() => {
-    applyDocumentBranding(settings)
-  }, [settings.siteTitle, settings.logoUrl])
+    applyDocumentBranding(settings, pageTitle)
+  }, [settings.siteTitle, settings.logoUrl, pageTitle])
 
   useEffect(() => {
     applyCustomCode(settings)
@@ -300,12 +320,10 @@ export function App() {
   const homeRegions = homeRegionOptions(homeNodes)
   const activeHomeRegion = homeRegion === 'ALL' || homeRegions.includes(homeRegion) ? homeRegion : 'ALL'
   const visibleHomeNodes = filterHomeNodesByRegion(homeNodes, activeHomeRegion)
-  const services = state.kind === 'ready' ? state.data.services : []
   const exchangeRates = normalizeCurrencyRates(state.kind === 'ready' ? state.data.exchangeRates : null)
   const homeCurrencyOptions = availableCurrencyOptions(exchangeRates)
   const activeHomeCurrency = homeCurrencyOptions.some((option) => option.value === homeCurrency) ? homeCurrency : 'CNY'
   const selectedNode = route.kind === 'node' ? nodes.find((node) => node.id === route.nodeId) : undefined
-  const selectedService = route.kind === 'service' ? services.find((service) => service.id === route.targetId) : undefined
   const totalCount = homeRealtimeNodes.length
   const onlineCount = homeRealtimeNodes.filter((node) => node.status === 'online').length
   const offlineCount = homeRealtimeNodes.filter((node) => node.status === 'offline').length
@@ -363,9 +381,15 @@ export function App() {
     onBackgroundToggle: backgroundToggle,
     backgroundEnabled: hasBackgroundImage,
   }
+  const siteTitle = effectiveSettings.siteTitle || 'Zeno'
+  const pageHeading = route.kind === 'admin' ? `后台 · ${siteTitle}` : pageTitle ? `${pageTitle} · ${siteTitle}` : siteTitle
+  const publicHeader = (
+    <DashboardHeader settings={effectiveSettings} onHome={navigateHome} onAdmin={navigateAdminSmoothly} onAdminIntent={preloadAdminIntent} onThemeChange={setThemeMode} onBackgroundToggle={backgroundToggle} backgroundEnabled={hasBackgroundImage} />
+  )
 
   return (
     <main className="kulin-shell" data-theme={effectiveSettings.theme} data-appearance={effectiveSettings.appearancePreset} data-background={hasBackgroundImage ? 'on' : 'off'} style={shellStyleForSettings(effectiveSettings)}>
+      <h1 className="sr-only page-heading">{pageHeading}</h1>
       {(adminSurfaceMounted || route.kind === 'admin') && (
         <div hidden={route.kind !== 'admin'} aria-hidden={route.kind !== 'admin'} data-admin-ready={adminSurfaceReady}>
           <AdminModuleErrorBoundary fallback={<AdminDashboardLoadError />}>
@@ -397,28 +421,13 @@ export function App() {
             adminToken={adminToken}
             expireAdminSession={expireAdminSession}
             onBack={navigateHome}
-            topHeader={<DashboardHeader settings={effectiveSettings} onHome={navigateHome} onAdmin={navigateAdminSmoothly} onAdminIntent={preloadAdminIntent} onThemeChange={setThemeMode} onBackgroundToggle={backgroundToggle} backgroundEnabled={hasBackgroundImage} />}
+            topHeader={publicHeader}
           />
         </Suspense>
       )}
 
       {state.kind === 'ready' && route.kind === 'node' && !selectedNode && (
-        <DashboardRouteState {...routeStateProps} isError message={`没有找到这台服务器：${route.nodeId}`} />
-      )}
-
-      {state.kind === 'ready' && route.kind === 'service' && (
-        <Suspense fallback={<DashboardRouteState {...routeStateProps} message="加载中…" />}>
-          <LazyServiceDetailRoute
-            targetId={route.targetId}
-            target={selectedService}
-            adminToken={adminToken}
-            expireAdminSession={expireAdminSession}
-            onBack={navigateHome}
-            topHeader={<DashboardHeader settings={effectiveSettings} onHome={navigateHome} onAdmin={navigateAdminSmoothly} onAdminIntent={preloadAdminIntent} onThemeChange={setThemeMode} onBackgroundToggle={backgroundToggle} backgroundEnabled={hasBackgroundImage} />}
-            loadingFallback={<DashboardRouteState {...routeStateProps} message="加载中…" />}
-            notFoundFallback={<DashboardRouteState {...routeStateProps} isError message={`没有找到这个监控服务：${route.targetId}`} />}
-          />
-        </Suspense>
+        <DashboardRouteState {...routeStateProps} isError notFound message={`没有找到这台服务器：${route.nodeId}`} />
       )}
 
       {state.kind === 'ready' && route.kind === 'home' && (

@@ -472,19 +472,8 @@ func TestLatencyWebSocketsPublishAgentProbeResults(t *testing.T) {
 		defer nodeResponse.Body.Close()
 	}
 	defer nodeConn.Close()
-	serviceConn, serviceResponse, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/public/v1/services/google-dns/latency/ws?range=1h", nil)
-	if err != nil {
-		t.Fatalf("open service latency websocket: %v", err)
-	}
-	if serviceResponse != nil && serviceResponse.Body != nil {
-		defer serviceResponse.Body.Close()
-	}
-	defer serviceConn.Close()
 	if _, _, err := nodeConn.ReadMessage(); err != nil {
 		t.Fatalf("read initial node latency websocket message: %v", err)
-	}
-	if _, _, err := serviceConn.ReadMessage(); err != nil {
-		t.Fatalf("read initial service latency websocket message: %v", err)
 	}
 
 	body := map[string]any{
@@ -529,44 +518,21 @@ func TestLatencyWebSocketsPublishAgentProbeResults(t *testing.T) {
 	if !latencyPointsContainAverage(nodeLatencyUpdate.Points, "google-dns", 20) {
 		t.Fatalf("node latency websocket update = %q, want posted probe average", string(nodeUpdate))
 	}
-	_, serviceUpdate, err := serviceConn.ReadMessage()
-	if err != nil {
-		t.Fatalf("read service latency update: %v", err)
-	}
-	var serviceLatencyUpdate ServiceTargetLatencyResponse
-	if err := json.Unmarshal(serviceUpdate, &serviceLatencyUpdate); err != nil {
-		t.Fatalf("decode service latency update: %v", err)
-	}
-	if !serviceLatencyPointsContainAverage(serviceLatencyUpdate.Points, "example-node-a", 20) {
-		t.Fatalf("service latency websocket update = %q, want posted probe average", string(serviceUpdate))
-	}
 }
 
-func TestServiceLatencyEndpointReturnsNodeSeries(t *testing.T) {
+func TestRemovedServiceLatencyEndpointsAreGone(t *testing.T) {
 	handler := newMockHandler()
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/public/v1/services/google/latency?range=1d", nil)
-
-	handler.ServeHTTP(recorder, request)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
-	}
-	var response ServiceTargetLatencyResponse
-	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
-		t.Fatalf("decode service latency: %v", err)
-	}
-	if response.Target.ID != "google" || response.Target.Name != "Google" {
-		t.Fatalf("target = %+v, want google target", response.Target)
-	}
-	if response.Range != "1d" || len(response.Points) == 0 {
-		t.Fatalf("service latency range/points = %q/%d, want 1d points", response.Range, len(response.Points))
-	}
-	if response.Points[0].NodeID == "" || response.Points[0].NodeName == "" {
-		t.Fatalf("service latency point missing node identity: %+v", response.Points[0])
-	}
-	if strings.Contains(strings.ToLower(recorder.Body.String()), "token") || strings.Contains(strings.ToLower(recorder.Body.String()), "secret") {
-		t.Fatalf("service latency leaked sensitive wording: %s", recorder.Body.String())
+	for _, path := range []string{
+		"/api/public/v1/services/google/latency?range=1d",
+		"/api/public/v1/services/google/latency/ws?range=1h",
+		"/api/public/v1/services/latency?range=1d",
+		"/api/public/v1/services/latency?range=1h",
+	} {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404", path, recorder.Code)
+		}
 	}
 }
 
@@ -769,15 +735,6 @@ func pointSpan(t *testing.T, points []LatencyPoint) time.Duration {
 func latencyPointsContainAverage(points []LatencyPoint, targetID string, average float64) bool {
 	for _, point := range points {
 		if point.TargetID == targetID && point.AvgMS != nil && *point.AvgMS == average {
-			return true
-		}
-	}
-	return false
-}
-
-func serviceLatencyPointsContainAverage(points []ServiceLatencyPoint, nodeID string, average float64) bool {
-	for _, point := range points {
-		if point.NodeID == nodeID && point.AvgMS != nil && *point.AvgMS == average {
 			return true
 		}
 	}

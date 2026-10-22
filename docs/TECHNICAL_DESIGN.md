@@ -139,7 +139,7 @@ delta_out = current_out_total - last_out_total
 
 不要只存 avg。
 
-Public summary 会返回 `services`，按后台探针目标显示顺序列出有效目标；目标本身没有全局启用/停用状态，具体节点是否探测由关联配置控制。服务详情接口 `GET /api/public/v1/services/{target_id}/latency` 把同一目标按节点分线返回，前端直接复用延迟图表。
+Public summary 会返回 `services`，按后台探针目标显示顺序列出有效目标；目标本身没有全局启用/停用状态，具体节点是否探测由关联配置控制。公开前台没有单独的服务延迟页面，也没有对应的服务延迟历史接口；目标顺序用于服务器详情页的延迟曲线取色。
 
 ## 通知
 

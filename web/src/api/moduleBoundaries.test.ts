@@ -15,7 +15,6 @@ describe('API module boundaries', () => {
     const publicControllers = [
       readSource('hooks/useSummaryController.ts'),
       readSource('hooks/useNodeDetailController.ts'),
-      readSource('hooks/useServiceDetailController.ts'),
     ].join('\n')
     expect(publicControllers).toContain("from '../api/publicClient'")
     expect(publicControllers).not.toContain("from '../api/adminClient'")

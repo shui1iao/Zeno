@@ -23,7 +23,7 @@ export function useDashboardRouter(onNavigateNode?: () => void) {
     document.documentElement.scrollTop = 0
     document.body.scrollTop = 0
     window.scrollTo({ left: 0, top: 0, behavior: 'auto' })
-  }, [route.kind, route.kind === 'node' ? route.nodeId : route.kind === 'service' ? route.targetId : ''])
+  }, [route.kind, route.kind === 'node' ? route.nodeId : ''])
 
   const navigateHome = () => {
     blurActiveElement()

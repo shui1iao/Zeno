@@ -55,7 +55,7 @@ function AdminAlertRuleList({ rules, onEdit, onUpdate }: { rules: AdminAlertRule
           <span>操作</span>
         </div>
         {rules.map((rule) => (
-          <article className="admin-list-row" role="listitem" key={rule.id}>
+          <div className="admin-list-row" role="listitem" key={rule.id}>
             <div className="admin-list-main">
               <strong>{rule.name}</strong>
               {formatAlertRuleNote(rule) && <small>{formatAlertRuleNote(rule)}</small>}
@@ -67,7 +67,7 @@ function AdminAlertRuleList({ rules, onEdit, onUpdate }: { rules: AdminAlertRule
               onEdit={() => onEdit(rule)}
               onDelete={() => setPendingDelete(rule)}
             />
-          </article>
+          </div>
         ))}
       </div>
       {pendingDelete && (
@@ -103,13 +103,13 @@ function AdminAlertRuleAddModal({ rules, nodes, onAdd, onClose }: { rules: Admin
           <div className="admin-rule-picker" role="list" aria-label="可添加通知类型">
             {rules.length === 0 && <div className="admin-state-card">所有通知类型都已添加。</div>}
             {rules.map((rule) => (
-              <article className="admin-rule-picker-row" role="listitem" key={rule.id}>
+              <div className="admin-rule-picker-row" role="listitem" key={rule.id}>
                 <div className="admin-list-main">
                   <strong>{rule.name}</strong>
                   <small>{formatAlertRuleNote(rule) || formatAlertRuleScope(rule, nodes)}</small>
                 </div>
                 <button className="admin-primary-action" type="button" onClick={() => addRule(rule.id)} disabled={submittingRuleId !== null}>{submittingRuleId === rule.id ? '添加中…' : '添加'}</button>
-              </article>
+              </div>
             ))}
           </div>
         </AdminFormSection>
@@ -152,50 +152,52 @@ function AdminAlertRuleEditModal({ rule, nodes, onUpdate, onClose }: { rule: Adm
   return (
     <AdminModal title="编辑通知类型" className="admin-alert-rule-modal" closeDisabled={submitting} onClose={onClose}>
       <form className="admin-alert-rule-edit-form admin-node-edit-form is-sectioned" aria-label={`${rule.name} 通知类型编辑`} aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
-        <AdminFormSection title="通知设置">
-          <div className="admin-form-grid admin-alert-rule-settings-grid">
-            {isRenewalRule && (
+        <div className="admin-modal-scroll">
+          <AdminFormSection title="通知设置">
+            <div className="admin-form-grid admin-alert-rule-settings-grid">
+              {isRenewalRule && (
+                <AdminExpandedCheckList
+                  title="已选提醒时间"
+                  panelLabel="选择提醒时间"
+                  options={renewalDayOptions.map((days) => ({ value: String(days), label: formatRenewalDayOption(days) }))}
+                  value={renewalDays.map(String)}
+                  onChange={(values) => setRenewalDays(values.map(Number))}
+                  allowEmpty={false}
+                />
+              )}
+              {supportsDuration && (
+                <label>
+                  <span>{isResourceRule ? '统计窗口 s' : '确认时间 s'}</span>
+                  <input name="rule-duration-sec" type="number" min="0" defaultValue={rule.durationSec} />
+                </label>
+              )}
+              {isResourceRule && (
+                <label>
+                  <span>平均超过 %</span>
+                  <input name="rule-threshold-percent" type="number" min="0" max="100" step="0.1" defaultValue={rule.threshold} />
+                </label>
+              )}
+            </div>
+          </AdminFormSection>
+          <AdminFormSection title="通知状态">
+            <label className="admin-node-toggle admin-alert-rule-enabled-toggle">
+              <input name="rule-enabled" type="checkbox" defaultChecked={rule.enabled} />
+              <span>启用通知类型</span>
+            </label>
+          </AdminFormSection>
+          {nodes.length > 0 && (
+            <AdminFormSection title="作用服务器">
               <AdminExpandedCheckList
-                title="已选提醒时间"
-                panelLabel="选择提醒时间"
-                options={renewalDayOptions.map((days) => ({ value: String(days), label: formatRenewalDayOption(days) }))}
-                value={renewalDays.map(String)}
-                onChange={(values) => setRenewalDays(values.map(Number))}
+                title="已选服务器"
+                panelLabel="选择服务器"
+                options={nodes.map((node) => ({ value: node.id, label: node.displayName || node.id }))}
+                value={scopeNodeIds}
+                onChange={setScopeNodeIds}
                 allowEmpty={false}
               />
-            )}
-            {supportsDuration && (
-              <label>
-                <span>{isResourceRule ? '统计窗口 s' : '确认时间 s'}</span>
-                <input name="rule-duration-sec" type="number" min="0" defaultValue={rule.durationSec} />
-              </label>
-            )}
-            {isResourceRule && (
-              <label>
-                <span>平均超过 %</span>
-                <input name="rule-threshold-percent" type="number" min="0" max="100" step="0.1" defaultValue={rule.threshold} />
-              </label>
-            )}
-          </div>
-        </AdminFormSection>
-        <AdminFormSection title="通知状态">
-          <label className="admin-node-toggle admin-alert-rule-enabled-toggle">
-            <input name="rule-enabled" type="checkbox" defaultChecked={rule.enabled} />
-            <span>启用通知类型</span>
-          </label>
-        </AdminFormSection>
-        {nodes.length > 0 && (
-          <AdminFormSection title="作用服务器">
-            <AdminExpandedCheckList
-              title="已选服务器"
-              panelLabel="选择服务器"
-              options={nodes.map((node) => ({ value: node.id, label: node.displayName || node.id }))}
-              value={scopeNodeIds}
-              onChange={setScopeNodeIds}
-              allowEmpty={false}
-            />
-          </AdminFormSection>
-        )}
+            </AdminFormSection>
+          )}
+        </div>
         <AdminActionFooter error={formError}>
           <button type="submit" disabled={submitting}>{submitting ? '保存中…' : '保存通知类型'}</button>
         </AdminActionFooter>
@@ -256,7 +258,7 @@ function AdminNotificationChannelList({ channels, onDelete, onEdit }: { channels
           <span>操作</span>
         </div>
         {channels.map((channel) => (
-          <article className="admin-list-row" role="listitem" key={channel.id}>
+          <div className="admin-list-row" role="listitem" key={channel.id}>
             <div className="admin-list-main">
               <strong>{channel.name}</strong>
             </div>
@@ -268,7 +270,7 @@ function AdminNotificationChannelList({ channels, onDelete, onEdit }: { channels
               onEdit={() => onEdit(channel)}
               onDelete={() => setPendingDelete(channel)}
             />
-          </article>
+          </div>
         ))}
       </div>
       {pendingDelete && (
@@ -320,26 +322,28 @@ function AdminNotificationChannelModal(props: AdminNotificationChannelModalProps
   return (
     <AdminModal title={editing ? '编辑通知渠道' : '添加通知渠道'} className="admin-notification-channel-modal" closeDisabled={submitting} onClose={props.onClose}>
       <form className={`admin-notification-${editing ? 'edit' : 'create'}-form admin-node-edit-form is-sectioned`} aria-label={editing ? '编辑通知渠道' : '添加通知渠道'} aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
-        <AdminFormSection title="渠道配置">
-          <div className="admin-form-grid admin-channel-form-grid">
-            <label>
-              <span>渠道名称</span>
-              <input name="channel-name" autoComplete="off" defaultValue={channel?.name} placeholder={editing ? undefined : 'Zeno Telegram'} />
-            </label>
-            <label>
-              <span>Telegram Chat ID</span>
-              <input name="channel-destination" autoComplete="off" defaultValue={channel?.destination} placeholder={editing ? undefined : '请输入 Telegram Chat ID'} />
-            </label>
-            <AdminCredentialField name="channel-credential" placeholder={channel?.credentialSet ? '留空则保留已保存 Token' : '请输入 Telegram Bot Token'} />
-            <label className="admin-node-toggle admin-channel-enabled-toggle">
-              <input name="channel-enabled" type="checkbox" defaultChecked={channel?.enabled ?? true} />
-              <span>{editing ? '启用渠道' : '创建后启用渠道'}</span>
-            </label>
-          </div>
-        </AdminFormSection>
+        <div className="admin-modal-scroll">
+          <AdminFormSection title="渠道配置">
+            <div className="admin-form-grid admin-channel-form-grid">
+              <label>
+                <span>渠道名称</span>
+                <input name="channel-name" autoComplete="off" defaultValue={channel?.name} placeholder={editing ? undefined : 'Zeno Telegram'} />
+              </label>
+              <label>
+                <span>Telegram Chat ID</span>
+                <input name="channel-destination" autoComplete="off" defaultValue={channel?.destination} placeholder={editing ? undefined : '请输入 Telegram Chat ID'} />
+              </label>
+              <AdminCredentialField name="channel-credential" placeholder={channel?.credentialSet ? '留空则保留当前凭据' : '请输入 Telegram Bot Token'} />
+              <label className="admin-node-toggle admin-channel-enabled-toggle">
+                <input name="channel-enabled" type="checkbox" defaultChecked={channel?.enabled ?? true} />
+                <span>{editing ? '启用渠道' : '创建后启用渠道'}</span>
+              </label>
+            </div>
+          </AdminFormSection>
+        </div>
         <AdminActionFooter error={formError}>
           {props.mode === 'edit' && <button type="button" onClick={() => props.onTest(props.channel.id)}>测试发送</button>}
-          <button type="submit" disabled={submitting}>{submitting ? '保存中…' : '保存通知渠道'}</button>
+          <button type="submit" disabled={submitting}>{submitting ? (editing ? '保存中…' : '添加中…') : (editing ? '保存通知渠道' : '添加通知渠道')}</button>
         </AdminActionFooter>
       </form>
     </AdminModal>
