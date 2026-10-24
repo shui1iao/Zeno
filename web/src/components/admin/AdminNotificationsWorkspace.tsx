@@ -3,7 +3,7 @@ import type { AdminAlertRuleUpdateInput, AdminNotificationChannelCreateInput, Ad
 import { runMaybePromise } from '../../lib/maybePromise'
 import type { AdminAlertRule, AdminNode, AdminNotificationChannel } from '../../types'
 import { AdminExpandedCheckList } from './AdminFields'
-import { AdminCredentialField, AdminDeleteConfirmModal, AdminFormSection, AdminModal, AdminActionFooter, AdminRowActions, AdminWorkspaceHeading } from './AdminPrimitives'
+import { AdminCredentialField, AdminDeleteConfirmModal, AdminModalPresence, AdminFormSection, AdminModal, AdminActionFooter, AdminRowActions, AdminWorkspaceHeading } from './AdminPrimitives'
 import { formatAlertRuleNote, formatAlertRuleScope, formatRenewalDayOption, normalizeRenewalDays, parseNonNegativeInt, parsePercentage, renewalDayOptions } from './adminOperationalModel'
 import type { AdminNotificationsWorkspaceProps, MaybePromise } from './adminOperationalTypes'
 
@@ -22,23 +22,23 @@ function AdminAlertRulesSection({ rules, nodes, onUpdate }: { rules: AdminAlertR
       {addedRules.length === 0 && <div className="admin-state-card">还没有添加通知类型。</div>}
       {addedRules.length > 0 && <AdminAlertRuleList rules={addedRules} onEdit={setEditingRule} onUpdate={onUpdate} />}
 
-      {addingRule && (
+      <AdminModalPresence>{addingRule && (
         <AdminAlertRuleAddModal
           rules={availableRules}
           nodes={nodes}
           onClose={() => setAddingRule(false)}
           onAdd={onUpdate}
         />
-      )}
+      )}</AdminModalPresence>
 
-      {editingRule && (
+      <AdminModalPresence>{editingRule && (
         <AdminAlertRuleEditModal
           rule={editingRule}
           nodes={nodes}
           onClose={() => setEditingRule(null)}
           onUpdate={onUpdate}
         />
-      )}
+      )}</AdminModalPresence>
     </section>
   )
 }
@@ -70,7 +70,7 @@ function AdminAlertRuleList({ rules, onEdit, onUpdate }: { rules: AdminAlertRule
           </div>
         ))}
       </div>
-      {pendingDelete && (
+      <AdminModalPresence>{pendingDelete && (
         <AdminDeleteConfirmModal
           title="删除通知类型"
           subjectName={pendingDelete.name}
@@ -79,7 +79,7 @@ function AdminAlertRuleList({ rules, onEdit, onUpdate }: { rules: AdminAlertRule
           onClose={() => setPendingDelete(null)}
           onConfirm={() => onUpdate(pendingDelete.id, { enabled: false })}
         />
-      )}
+      )}</AdminModalPresence>
     </>
   )
 }
@@ -226,14 +226,14 @@ export function AdminNotificationsWorkspace({ channels, rules, nodes, onChannelC
         </section>
       </div>
 
-      {creatingChannel && (
+      <AdminModalPresence>{creatingChannel && (
         <AdminNotificationChannelModal
           mode="create"
           onClose={() => setCreatingChannel(false)}
           onCreate={onChannelCreate}
         />
-      )}
-      {editingChannel && (
+      )}</AdminModalPresence>
+      <AdminModalPresence>{editingChannel && (
         <AdminNotificationChannelModal
           mode="edit"
           channel={editingChannel}
@@ -241,7 +241,7 @@ export function AdminNotificationsWorkspace({ channels, rules, nodes, onChannelC
           onTest={onChannelTest}
           onUpdate={onChannelUpdate}
         />
-      )}
+      )}</AdminModalPresence>
     </section>
   )
 }
@@ -273,7 +273,7 @@ function AdminNotificationChannelList({ channels, onDelete, onEdit }: { channels
           </div>
         ))}
       </div>
-      {pendingDelete && (
+      <AdminModalPresence>{pendingDelete && (
         <AdminDeleteConfirmModal
           title="删除通知渠道"
           subjectName={pendingDelete.name}
@@ -281,7 +281,7 @@ function AdminNotificationChannelList({ channels, onDelete, onEdit }: { channels
           onClose={() => setPendingDelete(null)}
           onConfirm={() => onDelete(pendingDelete.id)}
         />
-      )}
+      )}</AdminModalPresence>
     </>
   )
 }

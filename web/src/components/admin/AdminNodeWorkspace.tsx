@@ -7,7 +7,7 @@ import { ServerFlag } from '../ServerFlag'
 import { AdminDateField, AdminExpandedCheckList, AdminSegmentedField } from './AdminFields'
 import { AdminInstallCommand } from './AdminInstallCommand'
 import { AdminInlineSortList } from './AdminInlineSortList'
-import { AdminDeleteConfirmModal, AdminFormSection, AdminModal, AdminActionFooter, AdminRowActions, AdminWorkspaceHeading } from './AdminPrimitives'
+import { AdminDeleteConfirmModal, AdminModalPresence, AdminFormSection, AdminModal, AdminActionFooter, AdminRowActions, AdminWorkspaceHeading } from './AdminPrimitives'
 import { billingCycleOptions, billingModeOptions, formatQuotaValue, formatRenewalAmountInput, normalizeBillingCycle, parseMonthlyResetDay, parseQuota, parseRenewalAmount, quotaUnitForBytes, quotaUnitOptions, renewalCurrencyOptions } from './adminOperationalModel'
 import type { AdminNodeWorkspaceProps, MaybePromise } from './adminOperationalTypes'
 
@@ -29,15 +29,15 @@ export function AdminNodeWorkspace({ nodes, targets, onCreate, onUpdate, onReord
       {nodes.length === 0 && <div className="admin-state-card">还没有节点。</div>}
       {nodes.length > 0 && <AdminNodeList nodes={orderedNodes} onEdit={setEditingNodeId} onDelete={onDelete} onReorder={onReorder} />}
 
-      {creatingNode && (
+      <AdminModalPresence>{creatingNode && (
         <AdminNodeCreateModal
           onClose={() => setCreatingNode(false)}
           onCreate={onCreate}
           onInstallCommand={onInstallCommand}
         />
-      )}
+      )}</AdminModalPresence>
 
-      {editingNode && (
+      <AdminModalPresence>{editingNode && (
         <AdminNodeEditModal
           key={editingNode.id}
           node={editingNode}
@@ -46,7 +46,7 @@ export function AdminNodeWorkspace({ nodes, targets, onCreate, onUpdate, onReord
           onUpdate={onUpdate}
           onInstallCommand={onInstallCommand}
         />
-      )}
+      )}</AdminModalPresence>
     </section>
   )
 }
@@ -91,7 +91,7 @@ function AdminNodeList({ nodes, onEdit, onDelete, onReorder }: { nodes: AdminNod
         )}
         onReorder={(nextNodes) => onReorder(nextNodes.map((node) => node.id))}
       />
-      {pendingDelete && (
+      <AdminModalPresence>{pendingDelete && (
         <AdminDeleteConfirmModal
           title="删除服务器"
           subjectName={pendingDelete.displayName}
@@ -99,7 +99,7 @@ function AdminNodeList({ nodes, onEdit, onDelete, onReorder }: { nodes: AdminNod
           onClose={() => setPendingDelete(null)}
           onConfirm={() => onDelete(pendingDelete.id)}
         />
-      )}
+      )}</AdminModalPresence>
     </>
   )
 }

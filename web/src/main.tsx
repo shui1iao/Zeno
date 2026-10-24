@@ -4,6 +4,8 @@ import { App } from './App'
 import './styles.css'
 import './styles/admin-shell.css'
 import './styles/touch.css'
+import './styles/overlays.css'
+import './styles/button-hover.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

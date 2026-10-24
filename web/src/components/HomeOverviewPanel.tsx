@@ -1,4 +1,4 @@
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { DashboardHeader } from './DashboardHeader'
 import { ServerFlag } from './ServerFlag'
@@ -6,6 +6,8 @@ import { availableCurrencyOptions, formatCurrencyAmount, normalizeCurrencyCode, 
 import { defaultSettings } from '../lib/appearance'
 import type { AdminSettings, AdminTheme } from '../types'
 import { OverlaySurface } from './OverlaySurface'
+import { useAnchoredPopover } from '../hooks/useAnchoredPopover'
+import { useAnchoredPopoverPosition } from '../hooks/useAnchoredPopoverPosition'
 
 function compactBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0 B'
@@ -176,110 +178,24 @@ interface HomeCurrencyMenuProps {
   onChange?: (currency: CurrencyCode) => void
 }
 
-interface HomeCurrencyMenuPosition {
-  top: number
-  left: number
-}
-
-const homeCurrencyMenuWidth = 248
-const homeCurrencyMenuMargin = 8
-
-function resolveHomeCurrencyMenuPosition(button: HTMLButtonElement, viewportWidth: number): HomeCurrencyMenuPosition {
-  const rect = button.getBoundingClientRect()
-  const width = Math.min(homeCurrencyMenuWidth, viewportWidth - homeCurrencyMenuMargin * 2)
-  const preferredLeft = viewportWidth <= 767
-    ? rect.left + rect.width / 2 - width / 2
-    : rect.right - width
-  return {
-    top: rect.bottom + 7,
-    left: Math.max(homeCurrencyMenuMargin, Math.min(viewportWidth - width - homeCurrencyMenuMargin, preferredLeft)),
-  }
-}
+const currencyPopoverWidth = () => 248
+const currencyPopoverAlign = (width: number) => width <= 767 ? 'center' as const : 'end' as const
 
 function HomeCurrencyMenu({ value, options, onChange }: HomeCurrencyMenuProps) {
   const [open, setOpen] = useState(false)
-  const [menuPosition, setMenuPosition] = useState<HomeCurrencyMenuPosition | null>(null)
   const menuId = useId()
   const rootRef = useRef<HTMLDivElement | null>(null)
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const popoverRef = useRef<HTMLDivElement | null>(null)
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([])
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === value))
   const selectedOption = options[selectedIndex]
 
-  useEffect(() => {
-    if (!open) return undefined
-    const frame = window.requestAnimationFrame(() => optionRefs.current[selectedIndex]?.focus())
-    const handlePointerDown = (event: PointerEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) return
-      if (popoverRef.current?.contains(event.target as Node)) return
-      setOpen(false)
-      setMenuPosition(null)
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      setOpen(false)
-      setMenuPosition(null)
-      triggerRef.current?.focus()
-    }
-    const updatePosition = () => {
-      const button = triggerRef.current
-      if (button) setMenuPosition(resolveHomeCurrencyMenuPosition(button, window.innerWidth))
-    }
-    updatePosition()
-    document.addEventListener('pointerdown', handlePointerDown)
-    document.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('resize', updatePosition)
-    window.addEventListener('scroll', updatePosition, true)
-    return () => {
-      window.cancelAnimationFrame(frame)
-      document.removeEventListener('pointerdown', handlePointerDown)
-      document.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('resize', updatePosition)
-      window.removeEventListener('scroll', updatePosition, true)
-    }
-  }, [open, selectedIndex])
-
+  const dismiss = useCallback(() => setOpen(false), [])
+  const layer = useAnchoredPopover(open, triggerRef, popoverRef, dismiss, 'listbox')
+  const position = useAnchoredPopoverPosition({ open: layer.active, triggerRef, popoverRef, width: currencyPopoverWidth, fallbackHeight: Math.ceil(options.length / 2) * 38 + 14, margin: 8, gap: 7, align: currencyPopoverAlign })
   const selectCurrency = (currency: CurrencyCode) => {
     onChange?.(currency)
     setOpen(false)
-    setMenuPosition(null)
-    window.requestAnimationFrame(() => triggerRef.current?.focus())
-  }
-
-  const focusOption = (index: number) => {
-    const normalizedIndex = (index + options.length) % options.length
-    optionRefs.current[normalizedIndex]?.focus()
-  }
-
-  const handleOptionKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
-    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
-      event.preventDefault()
-      focusOption(index + 1)
-    } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
-      event.preventDefault()
-      focusOption(index - 1)
-    } else if (event.key === 'Home') {
-      event.preventDefault()
-      focusOption(0)
-    } else if (event.key === 'End') {
-      event.preventDefault()
-      focusOption(options.length - 1)
-    } else if (event.key === 'Tab') {
-      setOpen(false)
-      setMenuPosition(null)
-    }
-  }
-
-  const toggleMenu = () => {
-    if (open) {
-      setOpen(false)
-      setMenuPosition(null)
-      return
-    }
-    const button = triggerRef.current
-    if (button) setMenuPosition(resolveHomeCurrencyMenuPosition(button, window.innerWidth))
-    setOpen(true)
   }
 
   return (
@@ -293,29 +209,26 @@ function HomeCurrencyMenu({ value, options, onChange }: HomeCurrencyMenuProps) {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={menuId}
-        onClick={toggleMenu}
+        onClick={() => setOpen(current => !current)}
         onKeyDown={(event) => {
           if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
           event.preventDefault()
-          const button = triggerRef.current
-          if (button) setMenuPosition(resolveHomeCurrencyMenuPosition(button, window.innerWidth))
           setOpen(true)
         }}
       >
         <span className="home-currency-select__value">{selectedOption?.shortLabel ?? value}</span>
       </button>
-      {open && menuPosition && typeof document !== 'undefined' && createPortal(
-        <OverlaySurface ref={popoverRef} id={menuId} className="home-currency-popover" role="listbox" aria-label="金额单位" style={menuPosition}>
-          {options.map((option, index) => (
+      {layer.present && typeof document !== 'undefined' && createPortal(
+        <OverlaySurface ref={popoverRef} id={menuId} className="home-currency-popover" role="listbox" aria-label="金额单位" style={position.style} tabIndex={-1} data-anchored-overlay="" data-side={position.side} data-overlay-state={layer.state} onAnimationEnd={event => { if (event.target === event.currentTarget && layer.state === 'closed') layer.finishExit() }} inert={!layer.active} aria-hidden={!layer.active || undefined}>
+          {options.map((option) => (
             <button
               key={option.value}
-              ref={(element) => { optionRefs.current[index] = element }}
               type="button"
               role="option"
+              tabIndex={-1}
               aria-selected={option.value === value}
               data-active={option.value === value}
               onClick={() => selectCurrency(option.value)}
-              onKeyDown={(event) => handleOptionKeyDown(event, index)}
             >
               <ServerFlag countryCode={option.flagCode} className="home-currency-option__flag" />
               <span className="home-currency-option__name">{option.label.replace(` ${option.value}`, '')}</span>

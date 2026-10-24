@@ -5,7 +5,7 @@ import { runMaybePromise } from '../../lib/maybePromise'
 import type { AdminNode, AdminProbeTarget, ProbeType } from '../../types'
 import { AdminExpandedCheckList, AdminSegmentedField } from './AdminFields'
 import { AdminInlineSortList } from './AdminInlineSortList'
-import { AdminDeleteConfirmModal, AdminFormSection, AdminModal, AdminActionFooter, AdminRowActions, AdminWorkspaceHeading } from './AdminPrimitives'
+import { AdminDeleteConfirmModal, AdminModalPresence, AdminFormSection, AdminModal, AdminActionFooter, AdminRowActions, AdminWorkspaceHeading } from './AdminPrimitives'
 import { formatTargetAssignmentSummary, formatTargetEndpoint, normalizeTargetFormType, parsePositiveInt, targetAssignmentRows, targetTypeOptions } from './adminOperationalModel'
 import type { AdminTargetWorkspaceProps, MaybePromise } from './adminOperationalTypes'
 
@@ -27,15 +27,15 @@ export function AdminTargetWorkspace({ targets, nodes, onCreate, onUpdate, onReo
       {targets.length === 0 && <div className="admin-state-card">还没有目标。</div>}
       {targets.length > 0 && <AdminTargetList targets={sortedTargets} onEdit={setEditingTargetId} onDelete={onDelete} onReorder={onReorder} />}
 
-      {creatingTarget && (
+      <AdminModalPresence>{creatingTarget && (
         <AdminTargetCreateModal
           nodes={nodes}
           onClose={() => setCreatingTarget(false)}
           onCreate={onCreate}
         />
-      )}
+      )}</AdminModalPresence>
 
-      {editingTarget && (
+      <AdminModalPresence>{editingTarget && (
         <AdminTargetEditModal
           key={editingTarget.id}
           target={editingTarget}
@@ -43,7 +43,7 @@ export function AdminTargetWorkspace({ targets, nodes, onCreate, onUpdate, onReo
           onClose={() => setEditingTargetId(null)}
           onUpdate={onUpdate}
         />
-      )}
+      )}</AdminModalPresence>
     </section>
   )
 }
@@ -85,7 +85,7 @@ function AdminTargetList({ targets, onEdit, onDelete, onReorder }: { targets: Ad
         )}
         onReorder={(nextTargets) => onReorder(nextTargets.map((target) => target.id))}
       />
-      {pendingDelete && (
+      <AdminModalPresence>{pendingDelete && (
         <AdminDeleteConfirmModal
           title="删除目标"
           subjectName={pendingDelete.name}
@@ -93,7 +93,7 @@ function AdminTargetList({ targets, onEdit, onDelete, onReorder }: { targets: Ad
           onClose={() => setPendingDelete(null)}
           onConfirm={() => onDelete(pendingDelete.id)}
         />
-      )}
+      )}</AdminModalPresence>
     </>
   )
 }

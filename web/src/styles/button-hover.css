@@ -1,0 +1,48 @@
+/* Bordered controls only: keep geometry, material, text and semantic states intact.
+   The explicit allowlist also wins when admin/detail CSS is loaded after the entry. */
+:root { --control-hover-border: color-mix(in srgb, var(--blue) 48%, var(--border)); }
+
+@media (hover: hover) and (pointer: fine) {
+  :is(
+    .home-currency-select,
+    .nav-icon-button,
+    .login-link,
+    .theme-menu-popover button,
+    .home-currency-popover button,
+    .region-filter-buttons > button,
+    .range-tabs button,
+    .admin-section-actions button,
+    .admin-action-footer button,
+    .admin-row-action,
+    .admin-modal-close,
+    .admin-date-trigger,
+    .admin-date-permanent,
+    .admin-select-trigger,
+    .admin-select-popover button,
+    .admin-install-platforms button,
+    .admin-date-current-button,
+    .admin-date-option-panel button,
+    .admin-date-calendar-header > button,
+    .admin-date-actions button,
+    .admin-date-grid button,
+    .admin-node-edit-form button,
+    .admin-node-edit-form .admin-secret-input .admin-secret-toggle
+  ):hover:not(:disabled):where(
+    :not([aria-disabled='true'], .admin-primary-action, [type='submit'],
+      .is-danger, .admin-account-logout-button,
+      .is-active, .is-selected, [data-active='true'], [aria-selected='true'],
+      [aria-pressed='true'], [aria-expanded='true'], :focus-visible,
+      .sliding-selector > button, .admin-drag-handle,
+      .admin-assignment-field__header, .admin-assignment-field__bulk,
+      .admin-assignment-field__option)
+  ) {
+    border-color: var(--control-hover-border);
+  }
+}
+
+/* These controls previously had no border transition. Do not replace other transitions. */
+.region-filter-buttons > button,
+.admin-modal-close,
+.admin-date-calendar-header > button,
+.admin-date-actions button,
+.admin-date-grid button { transition: border-color 150ms ease; }

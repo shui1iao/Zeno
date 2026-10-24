@@ -1,47 +1,11 @@
-import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useDismissibleAnchoredPopover } from '../../hooks/useDismissibleAnchoredPopover'
+import { useAnchoredPopover } from '../../hooks/useAnchoredPopover'
+import { useAnchoredPopoverPosition as usePopoverPosition } from '../../hooks/useAnchoredPopoverPosition'
 import { OverlaySurface } from '../OverlaySurface'
+import { focusInPopover } from '../../lib/overlayFocus'
 
-type RectLike = Pick<DOMRect, 'top' | 'right' | 'bottom' | 'left' | 'width' | 'height'>
-type ViewportSize = { width: number; height: number }
-type PopoverSize = { width: number; height: number }
-
-export function calculateAnchoredPopoverStyle(trigger: RectLike, viewport: ViewportSize, popover: PopoverSize, margin = 12, gap = 8): CSSProperties {
-  const viewportWidth = Math.max(0, viewport.width)
-  const viewportHeight = Math.max(0, viewport.height)
-  const horizontalMargin = Math.min(Math.max(0, margin), viewportWidth / 2)
-  const verticalMargin = Math.min(Math.max(0, margin), viewportHeight / 2)
-  const width = Math.min(Math.max(0, popover.width), Math.max(0, viewportWidth - horizontalMargin * 2))
-  const height = Math.min(Math.max(0, popover.height), Math.max(0, viewportHeight - verticalMargin * 2))
-  const maxLeft = Math.max(horizontalMargin, viewportWidth - horizontalMargin - width)
-  const left = Math.min(Math.max(horizontalMargin, trigger.left), maxLeft)
-  const popoverGap = Math.max(0, gap)
-  const belowTop = trigger.bottom + popoverGap
-  const aboveTop = trigger.top - height - popoverGap
-  const maxTop = Math.max(verticalMargin, viewportHeight - verticalMargin - height)
-  const preferredTop = belowTop + height <= viewportHeight - verticalMargin || aboveTop < verticalMargin ? belowTop : aboveTop
-  const top = Math.min(Math.max(verticalMargin, preferredTop), maxTop)
-  const style: CSSProperties = { position: 'fixed', top, left, width }
-  if (height < popover.height) {
-    style.maxHeight = height
-    style.overflowY = 'auto'
-  }
-  return style
-}
-
-export function measureAnchoredPopoverHeight(popover: HTMLDivElement | null, fallbackHeight: number): number {
-  if (!popover) return fallbackHeight
-  // Re-measure the visible CSS box, not its scrollable content. Remove only our
-  // previous viewport cap so a resize can restore the menu's natural height.
-  const previousMaxHeight = popover.style.maxHeight
-  popover.style.maxHeight = ''
-  try {
-    return popover.offsetHeight || fallbackHeight
-  } finally {
-    popover.style.maxHeight = previousMaxHeight
-  }
-}
+export { calculateAnchoredPopoverStyle, measureAnchoredPopoverHeight } from '../../lib/anchoredPopover'
 
 export function adminPopoverExpanded(open: boolean, disabled: boolean): boolean {
   return open && !disabled
@@ -58,40 +22,16 @@ function useAnchoredPopoverPosition({ open, disabled, triggerRef, popoverRef, va
   optionCount?: number
   refreshKey?: string
 }): CSSProperties {
-  const [style, setStyle] = useState<CSSProperties>({})
-
-  useLayoutEffect(() => {
-    if (!open || disabled) return undefined
-    const updatePopoverPosition = () => {
-      const trigger = triggerRef.current
-      if (!trigger) return
-      const rect = trigger.getBoundingClientRect()
-      // Keep calendar paint compact without changing desktop sizing.
-      const touchCalendar = variant === 'calendar' && window.matchMedia('(pointer: coarse), (max-width: 767px)').matches
-      const margin = 12
-      const viewportWidth = Math.min(window.innerWidth, document.documentElement.clientWidth || window.innerWidth)
-      const availableWidth = Math.max(0, viewportWidth - margin * 2)
-      const width = variant === 'calendar'
-        ? Math.min(touchCalendar ? 312 : 340, availableWidth, Math.max(328, rect.width))
-        : Math.min(Math.max(rect.width, 160), Math.max(180, window.innerWidth - margin * 2))
-      const fallbackHeight = variant === 'calendar' ? 354 : Math.min(260, optionCount * 40 + 12)
-      const height = measureAnchoredPopoverHeight(popoverRef.current, fallbackHeight)
-      setStyle(calculateAnchoredPopoverStyle(rect, { width: viewportWidth, height: window.innerHeight }, { width, height }, margin))
-    }
-    updatePopoverPosition()
-    const frame = window.requestAnimationFrame(updatePopoverPosition)
-    const settleTimer = window.setTimeout(updatePopoverPosition, 80)
-    window.addEventListener('resize', updatePopoverPosition)
-    window.addEventListener('scroll', updatePopoverPosition, true)
-    return () => {
-      window.cancelAnimationFrame(frame)
-      window.clearTimeout(settleTimer)
-      window.removeEventListener('resize', updatePopoverPosition)
-      window.removeEventListener('scroll', updatePopoverPosition, true)
-    }
-  }, [open, disabled, variant, optionCount, refreshKey, triggerRef, popoverRef])
-
-  return style
+  const margin = 12
+  const width = useCallback((rect: { width: number }, viewportWidth: number) => {
+    const touchCalendar = variant === 'calendar' && window.matchMedia('(pointer: coarse), (max-width: 767px)').matches
+    const availableWidth = Math.max(0, viewportWidth - margin * 2)
+    return variant === 'calendar'
+      ? Math.min(touchCalendar ? 312 : 340, availableWidth, Math.max(328, rect.width))
+      : Math.min(Math.max(rect.width, 160), availableWidth)
+  }, [variant])
+  const position = usePopoverPosition({ open: open && !disabled, triggerRef, popoverRef, width, fallbackHeight: variant === 'calendar' ? 354 : Math.min(260, optionCount * 40 + 12), margin, refreshKey })
+  return position.style
 }
 
 export function AdminDateField({ name, label, defaultValue = '', defaultPermanent = false, disabled = false, permanentLabel, className = '' }: { name: string; label: string; defaultValue?: string | null; defaultPermanent?: boolean; disabled?: boolean; permanentLabel?: string; className?: string }) {
@@ -106,7 +46,7 @@ export function AdminDateField({ name, label, defaultValue = '', defaultPermanen
     setOpen(false)
     setOpenPanel(null)
   }, [])
-  useDismissibleAnchoredPopover(open && !disabled, triggerRef, popoverRef, dismissPopover)
+  const layer = useAnchoredPopover(open && !disabled, triggerRef, popoverRef, dismissPopover, 'calendar')
   const selectedDate = parseAdminDateValue(value)
   const today = new Date()
   const visibleYear = month.getFullYear()
@@ -119,7 +59,7 @@ export function AdminDateField({ name, label, defaultValue = '', defaultPermanen
     ...Array.from({ length: daysInMonth }, (_, index) => ({ key: `day-${index + 1}`, day: index + 1 })),
   ]
   const popoverStyle = useAnchoredPopoverPosition({
-    open,
+    open: layer.active,
     disabled,
     triggerRef,
     popoverRef,
@@ -172,8 +112,23 @@ export function AdminDateField({ name, label, defaultValue = '', defaultPermanen
     setOpenPanel(null)
   }, [disabled])
 
-  const calendar = open && !disabled ? (
-    <OverlaySurface ref={popoverRef} className="admin-date-popover" role="dialog" aria-label={`${label}日历`} style={popoverStyle}>
+  const moveDayFocus = (event: React.KeyboardEvent<HTMLButtonElement>, date: Date) => {
+    const delta = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : event.key === 'ArrowUp' ? -7 : event.key === 'ArrowDown' ? 7 : event.key === 'Home' ? -((date.getDay() + 6) % 7) : event.key === 'End' ? 6 - ((date.getDay() + 6) % 7) : null
+    if (delta === null && event.key !== 'PageUp' && event.key !== 'PageDown') return
+    event.preventDefault()
+    const next = new Date(date)
+    if (delta !== null) next.setDate(next.getDate() + delta)
+    else {
+      const day = next.getDate()
+      next.setDate(1)
+      next.setMonth(next.getMonth() + (event.key === 'PageUp' ? -1 : 1))
+      next.setDate(Math.min(day, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()))
+    }
+    setMonth(new Date(next.getFullYear(), next.getMonth(), 1))
+    requestAnimationFrame(() => { const root = popoverRef.current; if (root) focusInPopover(root, root.querySelector<HTMLElement>(`[data-date="${formatAdminDateValue(next)}"]`)) })
+  }
+  const calendar = layer.present ? (
+    <OverlaySurface ref={popoverRef} className="admin-date-popover" role="dialog" aria-label={`${label}日历`} style={popoverStyle} tabIndex={-1} data-anchored-overlay="" data-overlay-state={layer.state} onAnimationEnd={event => { if (event.target === event.currentTarget && layer.state === 'closed') layer.finishExit() }} inert={!layer.active} aria-hidden={!layer.active || undefined}>
       <div className="admin-date-calendar-header">
         <button type="button" aria-label="上个月" onClick={() => shiftMonth(-1)}>‹</button>
         <div className="admin-date-current" aria-label="选择年月">
@@ -209,7 +164,7 @@ export function AdminDateField({ name, label, defaultValue = '', defaultPermanen
               const isSelected = selectedDate ? dateValue === formatAdminDateValue(selectedDate) : false
               const isToday = dateValue === formatAdminDateValue(today)
               return (
-                <button className={`${isSelected ? 'is-selected' : ''}${isToday ? ' is-today' : ''}`} type="button" key={cell.key} onClick={() => pickDate(date)}>
+                <button className={`${isSelected ? 'is-selected' : ''}${isToday ? ' is-today' : ''}`} type="button" key={cell.key} data-date={dateValue} aria-label={dateValue} onKeyDown={event => moveDayFocus(event, date)} onClick={() => pickDate(date)}>
                   {cell.day}
                 </button>
               )
@@ -250,10 +205,10 @@ export function AdminSegmentedField({ name, label, options, value, defaultValue,
   const triggerRef = useRef<HTMLButtonElement | null>(null)
   const popoverRef = useRef<HTMLDivElement | null>(null)
   const dismissPopover = useCallback(() => setOpen(false), [])
-  useDismissibleAnchoredPopover(open && !disabled, triggerRef, popoverRef, dismissPopover)
+  const layer = useAnchoredPopover(open && !disabled, triggerRef, popoverRef, dismissPopover, 'listbox')
   const selectedValue = value ?? internalValue
   const selectedOption = options.find((option) => option.value === selectedValue) ?? options[0]
-  const popoverStyle = useAnchoredPopoverPosition({ open, disabled, triggerRef, popoverRef, variant: 'select', optionCount: options.length })
+  const popoverStyle = useAnchoredPopoverPosition({ open: layer.active, disabled, triggerRef, popoverRef, variant: 'select', optionCount: options.length })
   const setSelectedValue = (nextValue: string) => {
     if (disabled) return
     if (value === undefined) setInternalValue(nextValue)
@@ -266,10 +221,10 @@ export function AdminSegmentedField({ name, label, options, value, defaultValue,
   }, [disabled])
 
   const classes = ['admin-form-control', 'admin-segmented-field admin-select-menu-field', className, disabled ? 'is-disabled' : ''].filter(Boolean).join(' ')
-  const popover = open && !disabled ? (
-    <OverlaySurface ref={popoverRef} className="admin-select-popover" data-field={name} role="listbox" aria-label={`${label}选项`} style={popoverStyle}>
+  const popover = layer.present ? (
+    <OverlaySurface ref={popoverRef} className="admin-select-popover" data-field={name} role="listbox" aria-label={`${label}选项`} style={popoverStyle} tabIndex={-1} data-anchored-overlay="" data-overlay-state={layer.state} onAnimationEnd={event => { if (event.target === event.currentTarget && layer.state === 'closed') layer.finishExit() }} inert={!layer.active} aria-hidden={!layer.active || undefined}>
       {options.map((option) => (
-        <button key={option.value} type="button" role="option" aria-selected={selectedValue === option.value} data-active={selectedValue === option.value} onClick={() => setSelectedValue(option.value)}>
+        <button key={option.value} type="button" role="option" tabIndex={-1} aria-selected={selectedValue === option.value} data-active={selectedValue === option.value} onClick={() => setSelectedValue(option.value)}>
           <span>{option.label}</span>
         </button>
       ))}

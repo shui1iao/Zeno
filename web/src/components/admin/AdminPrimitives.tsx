@@ -1,6 +1,16 @@
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, createContext, useContext, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { OverlayOwnerContext, useOverlayPresence } from '../../hooks/useOverlayPresence'
+import { focusWithoutScroll, overlayTabStops } from '../../lib/overlayFocus'
 import { runMaybePromise, type MaybePromise } from '../../lib/maybePromise'
+
+const AdminModalState = createContext<{ state: 'open' | 'closed'; finishExit: () => void }>({ state: 'open', finishExit: () => {} })
+export function AdminModalPresence({ children }: { children: ReactNode }) {
+  const presence = useOverlayPresence(Boolean(children))
+  const previous = useRef(children)
+  if (children) previous.current = children
+  return presence.present ? <AdminModalState value={presence}>{children || previous.current}</AdminModalState> : null
+}
 
 function AdminModalLayer({ children }: { children: ReactNode }) {
   if (typeof document === 'undefined') return <>{children}</>
@@ -8,6 +18,8 @@ function AdminModalLayer({ children }: { children: ReactNode }) {
 }
 
 export function AdminModal({ title, onClose, children, className, descriptionId, closeDisabled = false }: { title: string; onClose: () => void; children: ReactNode; className?: string; descriptionId?: string; closeDisabled?: boolean }) {
+  const { state, finishExit } = useContext(AdminModalState)
+  const active = state === 'open'
   const modalRef = useRef<HTMLElement | null>(null)
   const titleId = useId()
   useEffect(() => {
@@ -23,57 +35,50 @@ export function AdminModal({ title, onClose, children, className, descriptionId,
       'button:not([disabled])',
       '[tabindex]:not([tabindex="-1"])',
     ].join(','))
-    ;(initialTarget ?? modal).focus()
+    focusWithoutScroll(window.matchMedia('(pointer: coarse), (max-width: 767px)').matches ? modal : initialTarget ?? modal)
     return () => {
-      if (previouslyFocused?.isConnected) previouslyFocused.focus()
+      if (previouslyFocused?.isConnected) focusWithoutScroll(previouslyFocused)
     }
   }, [])
   const handleKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') {
-      if (closeDisabled) return
       event.preventDefault()
       event.stopPropagation()
+      if (closeDisabled || !active) return
       onClose()
       return
     }
     if (event.key !== 'Tab') return
     const modal = modalRef.current
     if (!modal) return
-    const focusable = Array.from(modal.querySelectorAll<HTMLElement>([
-      'a[href]',
-      'button:not([disabled])',
-      'input:not([disabled])',
-      'select:not([disabled])',
-      'textarea:not([disabled])',
-      '[tabindex]:not([tabindex="-1"])',
-    ].join(','))).filter((element) => element.getAttribute('aria-hidden') !== 'true')
+    const focusable = overlayTabStops(modal)
     if (focusable.length === 0) {
       event.preventDefault()
-      modal.focus()
+      focusWithoutScroll(modal)
       return
     }
     const first = focusable[0]
     const last = focusable[focusable.length - 1]
-    const active = document.activeElement
-    if (event.shiftKey && (active === first || !modal.contains(active))) {
+    const focused = document.activeElement
+    if (event.shiftKey && (focused === first || !modal.contains(focused))) {
       event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && (active === last || !modal.contains(active))) {
+      focusWithoutScroll(last)
+    } else if (!event.shiftKey && (focused === last || !modal.contains(focused))) {
       event.preventDefault()
-      first.focus()
+      focusWithoutScroll(first)
     }
   }
   return (
     <AdminModalLayer>
-      <div className="admin-modal-backdrop" role="presentation">
-        <section ref={modalRef} className={`admin-modal${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} tabIndex={-1} onKeyDown={handleKeyDown}>
+      <div className="admin-modal-backdrop" role="presentation" data-overlay-state={state} inert={!active} aria-hidden={!active || undefined}>
+        <section ref={modalRef} className={`admin-modal${className ? ` ${className}` : ''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} tabIndex={-1} data-overlay-state={state} onAnimationEnd={event => { if (event.target === event.currentTarget && !active) finishExit() }} onKeyDown={handleKeyDown}>
           <header className="admin-modal-header">
             <div>
               <h3 id={titleId}>{title}</h3>
             </div>
             <button className="admin-modal-close" type="button" onClick={onClose} aria-label="关闭弹窗" disabled={closeDisabled}>×</button>
           </header>
-          <div className="admin-modal-body">{children}</div>
+          <OverlayOwnerContext value={active}><div className="admin-modal-body">{children}</div></OverlayOwnerContext>
         </section>
       </div>
     </AdminModalLayer>

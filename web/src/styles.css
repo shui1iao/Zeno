@@ -273,7 +273,7 @@ svg { display: block; }
   font-size: 14px;
   font-weight: 500;
   box-shadow: none;
-  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 .login-link:hover { background: transparent; color: var(--blue); box-shadow: none; transform: none; }
 .nav-icon-button {
@@ -288,7 +288,7 @@ svg { display: block; }
   color: var(--foreground);
   background: transparent;
   box-shadow: none;
-  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
 }
 .nav-icon-button.is-solid { background: color-mix(in srgb, var(--blue) 12%, transparent); color: var(--blue); }
 .nav-icon-button:disabled { cursor: default; opacity: .45; }

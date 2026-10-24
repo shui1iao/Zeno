@@ -1,0 +1,17 @@
+/* Only popup lifecycle: existing geometry, materials and selected states stay authoritative. */
+:is(.home-currency-popover, .admin-select-popover, .admin-date-popover, .admin-modal)[data-overlay-state='open'] {
+  animation: zeno-overlay-enter 160ms ease-out;
+}
+:is(.home-currency-popover, .admin-select-popover, .admin-date-popover, .admin-modal)[data-overlay-state='closed'] {
+  animation: zeno-overlay-exit 120ms ease-in forwards;
+  pointer-events: none;
+}
+.admin-modal-backdrop[data-overlay-state='open'] { animation: zeno-overlay-fade-in 160ms ease-out; }
+.admin-modal-backdrop[data-overlay-state='closed'] { animation: zeno-overlay-fade-out 120ms ease-in forwards; pointer-events: none; }
+@keyframes zeno-overlay-enter { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: scale(1); } }
+@keyframes zeno-overlay-exit { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(.97); } }
+@keyframes zeno-overlay-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zeno-overlay-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  :is(.home-currency-popover, .admin-select-popover, .admin-date-popover, .admin-modal, .admin-modal-backdrop)[data-overlay-state] { animation: none; }
+}

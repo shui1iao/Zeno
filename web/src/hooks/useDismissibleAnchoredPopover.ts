@@ -63,7 +63,7 @@ export function useDismissibleAnchoredPopover<TTrigger extends HTMLElement, TPop
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!anchoredPopoverStack.isTopmost(id) || !consumeAnchoredPopoverEscape(event)) return
       dismissRef.current()
-      window.requestAnimationFrame(() => triggerRef.current?.focus())
+      window.requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }))
     }
 
     // Capture on window so Escape is consumed before a parent modal can close.
