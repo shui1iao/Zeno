@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { HomeCardNode, LatencyPoint, StatePoint } from '../types'
-import { formatDateTime, formatLatency } from '../lib/format'
+import { formatLatency, formatTooltipDateTime } from '../lib/format'
 import { summarizeLatencyTargets } from '../lib/latencyTargets'
 import { seriesColorMap } from '../lib/seriesColors'
 import { LatencyChart } from './LatencyChart'
@@ -10,8 +10,8 @@ import { StateHistoryPanel } from './StateHistoryPanel'
 import { availableHistoryRanges } from '../lib/historyRange'
 import { HistoryRangeSelector } from './HistoryRangeSelector'
 import { SmoothingSelector, type SmoothingMode } from './SmoothingSelector'
+import { latencyTargetCorners } from '../lib/targetGridCorners'
 
-const loadPlaceholder = '-- / -- / --'
 const DESKTOP_LATENCY_COLUMNS = 7
 const MOBILE_LATENCY_COLUMNS = 3
 
@@ -34,25 +34,12 @@ interface LatencyDetailProps {
   targetOrder?: string[]
 }
 
-function latencyTargetCorners(index: number, total: number, columns: number): string {
-  if (total <= 0) return ''
-  const firstRowIsFull = total >= columns
-  const lastRowStart = Math.floor((total - 1) / columns) * columns
-  const lastRowIsFull = total % columns === 0
-  const corners: string[] = []
-  if (index === 0) corners.push('top-left')
-  if (firstRowIsFull && index === columns - 1) corners.push('top-right')
-  if (index === lastRowStart) corners.push('bottom-left')
-  if (lastRowIsFull && index === total - 1) corners.push('bottom-right')
-  return corners.join(' ')
-}
-
 export function LatencyDetail({
   node,
   points,
   statePoints = [],
   range,
-  stateRange = '1h',
+  stateRange = '1d',
   loading = false,
   error,
   stateLoading = false,
@@ -83,19 +70,10 @@ export function LatencyDetail({
     : summaryUptimeSeconds !== null
       ? formatUptime(summaryUptimeSeconds)
       : formatUptimeFromBootTime(node.bootTime)
-  const loadValue = latestState && latestState.load1 !== null && latestState.load5 !== null && latestState.load15 !== null
-    ? `${formatFixed(latestState.load1, 2)} / ${formatFixed(latestState.load5, 2)} / ${formatFixed(latestState.load15, 2)}`
-    : node.load1 !== null && node.load1 !== undefined && node.load5 !== null && node.load5 !== undefined && node.load15 !== null && node.load15 !== undefined
-      ? `${formatFixed(node.load1, 2)} / ${formatFixed(node.load5, 2)} / ${formatFixed(node.load15, 2)}`
-    : loadPlaceholder
-  const memoryUsageValue = formatBinaryUsage(
-    latestState?.memoryUsedBytes ?? node.memoryUsedBytes,
-    latestState?.memoryTotalBytes ?? node.memoryTotalBytes,
-  )
-  const diskUsageValue = formatBinaryUsage(
-    latestState?.diskUsedBytes ?? node.diskUsedBytes,
-    latestState?.diskTotalBytes ?? node.diskTotalBytes,
-  )
+  // Memory, disk and load are left to the resource panel below and the home card;
+  // the header keeps what neither of them shows.
+  const bootValue = formatBootShort(node.bootTime)
+  const runtimeValue = uptimeValue ? (bootValue ? `${uptimeValue} · ${bootValue} 起` : uptimeValue) : null
   const hasLatencyData = points.length > 0 || targetSummaries.length > 0
   const showLatencySkeleton = loading && !hasLatencyData && !error
   const desktopLatencyLastRowStart = Math.floor((targetSummaries.length - 1) / DESKTOP_LATENCY_COLUMNS) * DESKTOP_LATENCY_COLUMNS
@@ -124,11 +102,8 @@ export function LatencyDetail({
           <section className="detail-fact-strip detail-fact-strip--server" aria-label={`${node.displayName} server facts`}>
             <InfoFact label="系统" value={formatSystemSpec(node)} wide />
             <InfoFact label="CPU" value={formatCpuSpec(node)} wide />
-            <InfoFact label="内存" value={memoryUsageValue} />
-            <InfoFact label="磁盘" value={diskUsageValue} />
-            <InfoFact label="开机时间" value={formatBootTime(node.bootTime)} />
-            <InfoFact label="运行时间" value={uptimeValue ?? '--'} adaptive pending={!uptimeValue} />
-            <InfoFact label="负载" value={loadValue} adaptive keepWhole pending={loadValue === loadPlaceholder} />
+            <InfoFact label="平台" value={formatPlatform(node.virtualization)} />
+            <InfoFact label="运行时间" value={runtimeValue ?? '--'} adaptive pending={!runtimeValue} />
             <TrafficFact sent={formatBinaryBytes(node.netOutTotalBytes)} received={formatBinaryBytes(node.netInTotalBytes)} />
           </section>
         </section>
@@ -295,8 +270,8 @@ function InfoFact({ label, value, wide = false, adaptive = false, pending = fals
 
 function TrafficFact({ sent, received }: { sent: string; received: string }) {
   return (
-    <article className="detail-fact detail-fact--traffic" title={`累计流量: ↑ ${sent}  ↓ ${received}`}>
-      <p>累计流量</p>
+    <article className="detail-fact detail-fact--traffic" title={`总流量: ↑ ${sent}  ↓ ${received}`}>
+      <p>总流量</p>
       <strong className="detail-traffic-values">
         <span className="detail-traffic-value"><span aria-hidden="true">↑</span><span>{sent}</span></span>
         <span className="detail-traffic-value"><span aria-hidden="true">↓</span><span>{received}</span></span>
@@ -352,8 +327,23 @@ function coreTypeLabel(virtualization?: string): { singular: string; plural: str
   return { singular: 'Physical Core', plural: 'Physical Cores' }
 }
 
-function formatBootTime(value: string | undefined): string {
-  return formatDateTime(value)
+/** "09/27 21:40" for the runtime fact; null when the boot time is unknown. */
+function formatBootShort(value: string | undefined): string | null {
+  if (!value) return null
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? formatTooltipDateTime(timestamp) : null
+}
+
+const platformNames: Record<string, string> = {
+  kvm: 'KVM', qemu: 'QEMU', xen: 'Xen', vmware: 'VMware', lxc: 'LXC', openvz: 'OpenVZ', docker: 'Docker',
+  podman: 'Podman', microsoft: 'Hyper-V', 'hyper-v': 'Hyper-V', oracle: 'VirtualBox', bhyve: 'bhyve', parallels: 'Parallels',
+}
+
+/** Hypervisor or hardware product reported by the agent; short probe tokens get their usual spelling. */
+export function formatPlatform(value: string | undefined): string {
+  const trimmed = value?.trim() ?? ''
+  if (trimmed === '') return '--'
+  return platformNames[trimmed.toLowerCase()] ?? trimmed
 }
 
 function formatBinaryBytes(value: number | null | undefined): string {
@@ -367,12 +357,6 @@ function formatBinaryBytes(value: number | null | undefined): string {
     unit += 1
   }
   return `${size.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`
-}
-
-function formatBinaryUsage(used: number | null | undefined, total: number | null | undefined): string {
-  if ((used === null || used === undefined) && (total === null || total === undefined)) return '--'
-  // Whole-number totals drop the redundant ".00" (e.g. "50 GB").
-  return `${formatBinaryBytes(used)} / ${formatBinaryBytes(total).replace(/\.00 /, ' ')}`
 }
 
 function formatLossPercent(value: number | null | undefined): string {
@@ -393,9 +377,5 @@ function formatUptime(seconds: number): string {
   if (days > 0) return `${days} 天 ${hours} 小时`
   if (hours > 0) return `${hours} 小时 ${minutes} 分钟`
   return `${Math.max(1, minutes)} 分钟`
-}
-
-function formatFixed(value: number, digits: number): string {
-  return value.toFixed(digits)
 }
 

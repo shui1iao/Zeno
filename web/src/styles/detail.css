@@ -105,6 +105,14 @@
   border-radius: 0;
 }
 .detail-fact-strip--server { border-top: 0; }
+/* Five header facts: system and CPU share the first row, three short facts the second. */
+@media (min-width: 768px) {
+  .detail-fact-strip--server .detail-fact:not(.is-wide) { grid-column: span 2; }
+}
+@media (max-width: 767px) {
+  .detail-fact-strip--server .detail-fact:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .detail-fact-strip--server .detail-fact--traffic:last-child:nth-child(odd) .detail-traffic-values { flex-direction: row; align-items: center; column-gap: 18px; }
+}
 .detail-fact-strip--service { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .detail-fact {
   min-width: 0;

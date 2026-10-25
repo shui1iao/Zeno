@@ -90,7 +90,11 @@ export function LatencyChart({
   // domain so that nominal tick lands exactly on the left edge and every fixed-
   // step tick occupies the same number of pixels. The data line keeps its actual
   // sample domain; the difference is only one cadence at the left boundary.
-  const axisTimeStart = candidateAxisTicks[0] ?? timeStart
+  // Only that nominal tick (before the oldest row) may move the axis start: when
+  // the first tick falls inside the data, labels must share the line's domain or
+  // every label would shift by up to one step.
+  const firstAxisTick = candidateAxisTicks[0]
+  const axisTimeStart = firstAxisTick !== undefined && firstAxisTick < timeStart ? firstAxisTick : timeStart
   const axisTimeSpan = Math.max(0, timeEnd - axisTimeStart)
   const axisX = (createdAt: number) => {
     if (axisTimeSpan <= 0) return pad.left

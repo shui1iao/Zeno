@@ -185,6 +185,37 @@ describe('LatencyChart', () => {
   })
 })
 
+describe('LatencyChart time axis alignment', () => {
+  it('keeps hour labels on the data time scale when the window is shorter than a full step multiple', () => {
+    // 23 h 20 min of one-minute samples: the nominal "24 h ago" tick is far
+    // outside the data, so the first label falls inside it and must not be
+    // stretched to the left edge.
+    const end = Date.parse('2026-07-02T23:00:00Z')
+    const start = end - (23 * 60 + 20) * 60_000
+    const series = Array.from({ length: (end - start) / 60_000 + 1 }, (_, index) => ({
+      ts: new Date(start + index * 60_000).toISOString(),
+      targetId: 'alpha',
+      targetName: 'Alpha',
+      medianMs: 10,
+      avgMs: 10,
+      lossPercent: 0,
+    }))
+    const html = renderToStaticMarkup(<LatencyChart points={series} hideHeader hideLegend />)
+    const width = 960
+    const padLeft = 60
+    const padRight = 24
+    const expectedX = (t: number) => padLeft + ((t - start) / (end - start)) * (width - padLeft - padRight)
+    const labels = [...html.matchAll(/<text x="([\d.]+)" y="(\d+(?:\.\d+)?)" class="axis-label" text-anchor="middle">([^<]+)<\/text>/g)]
+    expect(labels.length).toBeGreaterThan(3)
+    const tick = end - 2 * 3_600_000
+    const label = new Date(tick)
+    const text = `${String(label.getHours()).padStart(2, '0')}:${String(label.getMinutes()).padStart(2, '0')}`
+    const match = labels.find((item) => item[3] === text)
+    expect(match).toBeDefined()
+    expect(Number(match![1])).toBeCloseTo(expectedX(tick), 1)
+  })
+})
+
 describe('pruneCollidingAxisTicks endpoint reservation', () => {
   const charWidth = 7.2
   const label = (t: number) => (t === 0 ? '18:44' : t === 999 ? '18:43' : '12:00')

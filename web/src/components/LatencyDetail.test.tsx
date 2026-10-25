@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { HomeCardNode, LatencyPoint, StatePoint } from '../types'
-import { LatencyDetail } from './LatencyDetail'
+import { formatPlatform, LatencyDetail } from './LatencyDetail'
 
 const node = {
   id: 'example-node-a',
@@ -82,32 +82,36 @@ describe('LatencyDetail', () => {
     expect(html).toContain('AMD EPYC 7B13')
     expect(html).toContain('2 Virtual Cores')
     expect(html).not.toContain('2 Cores')
-    expect(html).not.toContain('kvm')
+    expect(html).toContain('平台')
+    expect(html).toContain('>KVM<')
     expect(html).not.toContain('Standard PC')
     expect(html).toContain('运行时间')
-    expect(html).toContain('1 小时 1 分钟')
-    expect(html).toContain('负载')
+    // Boot time and uptime are one fact now.
+    expect(html).toContain('1 小时 1 分钟 ·')
+    expect(html).toContain('07/02 09:00 起')
+    expect(html).not.toContain('开机时间')
+    expect(html).not.toContain('本月流量')
     expect(html).not.toContain('is-emphasis')
-    expect(html.match(/is-adaptive/g)).toHaveLength(2)
+    expect(html.match(/is-adaptive/g)).toHaveLength(1)
     expect(html).toContain('0.42 / 0.35 / 0.28')
     expect(html).toContain('debian 13')
     expect(html).toContain('6.12.0')
     expect(html).not.toContain('debian 13 · aarch64 · 6.12.0 · HK')
     expect(html).not.toContain('12.0% · AMD EPYC 7B13')
-    expect(html).toContain('2.00 KB / 4 KB')
-    expect(html).toContain('4.00 KB / 8 KB')
+    // Memory, disk and load are no longer repeated in the header facts.
+    expect(html).not.toContain('2.00 KB / 4 KB')
+    expect(html).not.toContain('4.00 KB / 8 KB')
+    expect(html).not.toContain('<p>负载</p>')
+    expect(html).not.toContain('<p>内存</p>')
+    expect(html).not.toContain('<p>磁盘</p>')
     expect(html).toContain('18.8%')
     expect(html).not.toContain('CPU 使用')
     expect(html).not.toContain('规格')
-    expect(html).toContain('内存')
-    expect(html).toContain('磁盘')
-    expect(html).toContain('开机时间')
-    expect(html).toContain('2026/07/02 09:00')
     expect(html).not.toContain('↑256 B/s ↓128 B/s')
     expect(html).toContain('detail-fact--traffic')
     expect(html).toContain('detail-traffic-values')
     expect(html).toContain('detail-traffic-value')
-    expect(html).toContain('累计流量: ↑ 2.00 KB  ↓ 1.00 KB')
+    expect(html).toContain('总流量: ↑ 2.00 KB  ↓ 1.00 KB')
     expect(html).not.toContain('detail-info-card')
     expect(html).toContain('系统资源趋势')
     expect(html).not.toContain('实时 · 1 个状态采样')
@@ -210,15 +214,18 @@ describe('LatencyDetail', () => {
     )
 
     expect(html).toContain('运行时间')
-    expect(html).toContain('负载')
     expect(html).toContain('2 分钟')
-    expect(html).toContain('0.11 / 0.12 / 0.13')
-    expect(html).toContain('累计流量')
-    expect(html).toContain('1.00 KB / 4 KB')
-    expect(html).toContain('2.00 KB / 8 KB')
+    expect(html).toContain('总流量')
+    expect(html).not.toContain('本月流量')
     expect(html).toContain('latency-target-grid is-loading')
     expect(html).toContain('latency-panel-skeleton')
     expect(html).toContain('class="sr-only" role="status" data-state="loading" aria-live="polite">正在读取网络延迟…</div>')
+  })
+
+  it('shows the reported platform with conventional spelling', () => {
+    expect(formatPlatform('kvm')).toBe('KVM')
+    expect(formatPlatform('CloudStack KVM Hypervisor')).toBe('CloudStack KVM Hypervisor')
+    expect(formatPlatform('')).toBe('--')
   })
 
   it('keeps warning detail status distinct from offline', () => {

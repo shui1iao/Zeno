@@ -118,7 +118,7 @@ interface NodeDetailControllerOptions {
 
 export function useNodeDetailController({ nodeId, summary, adminToken, expireAdminSession }: NodeDetailControllerOptions) {
   const [nodeLatencyRange, setNodeLatencyRange] = useState('1d')
-  const [stateRange, setStateRange] = useState('1h')
+  const [stateRange, setStateRange] = useState('1d')
   const [latencyState, setLatencyState] = useState<LatencyLoadState>(() => {
     if (nodeId === null) return { kind: 'idle' }
     const seeded = seedNodeLatencyFromSummary(summary, nodeId, '1d')
@@ -126,7 +126,7 @@ export function useNodeDetailController({ nodeId, summary, adminToken, expireAdm
   })
   const [stateHistoryState, setStateHistoryState] = useState<StateHistoryLoadState>(() => {
     if (nodeId === null) return { kind: 'idle' }
-    const seeded = seedNodeStateFromSummary(summary, nodeId, '1h')
+    const seeded = seedNodeStateFromSummary(summary, nodeId, '1d')
     return seeded ? { kind: 'ready', data: seeded } : { kind: 'idle' }
   })
   const nodeLatencyCacheRef = useRef(new DetailMemoryCache<NodeLatencyData>())
@@ -136,7 +136,7 @@ export function useNodeDetailController({ nodeId, summary, adminToken, expireAdm
   useEffect(() => {
     const hasToken = adminToken !== ''
     const nextNodeRange = coerceHistoryRange(nodeLatencyRange, hasToken, '1d')
-    const nextStateRange = coerceHistoryRange(stateRange, hasToken, '1h')
+    const nextStateRange = coerceHistoryRange(stateRange, hasToken, '1d')
     if (nextNodeRange !== nodeLatencyRange) setNodeLatencyRange(nextNodeRange)
     if (nextStateRange !== stateRange) setStateRange(nextStateRange)
   }, [adminToken, nodeLatencyRange, stateRange])
@@ -270,7 +270,7 @@ export function useNodeDetailController({ nodeId, summary, adminToken, expireAdm
     setStateRange,
     resetNodeRanges: () => {
       setNodeLatencyRange('1d')
-      setStateRange('1h')
+      setStateRange('1d')
     },
   }
 }
