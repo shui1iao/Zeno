@@ -63,11 +63,14 @@ describe('StateHistoryPanel', () => {
     const tiles = html.slice(html.indexOf('resource-metric-grid'), html.indexOf('resource-chart-panel'))
     expect(tiles).not.toContain('aria-pressed="true"')
     expect(html).toContain('18.8%')
-    expect(html).toContain('负载 0.42 / 0.35 / 0.28')
+    const cpuTile = tiles.slice(tiles.indexOf('data-metric="cpu"'), tiles.indexOf('data-metric="memory"'))
+    expect(cpuTile).toContain('<em>0.42 / 0.35 / 0.28</em>')
+    expect(cpuTile).not.toContain('负载')
     expect(html).toContain('2.0 KB / 4.0 KB')
     expect(html).toContain('4.0 KB / 8.0 KB')
-    expect(html).toContain('↑ 512.0 KB/s')
-    expect(html).toContain('↓ 64.0 KB/s')
+    const networkTile = tiles.slice(tiles.indexOf('data-metric="network"'), tiles.indexOf('data-metric="processes"'))
+    expect(networkTile).toContain('<strong>↓ 64.0 KB/s</strong>')
+    expect(networkTile).toContain('<em>↑ 512.0 KB/s</em>')
     expect(html).toContain('>88<')
     expect(html).toContain('34 / 12')
     // Two-line tiles carry no empty third line, so their value can centre.
@@ -102,6 +105,34 @@ describe('StateHistoryPanel', () => {
     // Upload and download share the network peak (1024).
     expect(all.series.find((item) => item.key === 'net-out')?.plot).toEqual([50, 100])
     expect(all.series.find((item) => item.key === 'net-in')?.plot).toEqual([25, null])
+  })
+
+  it('puts the latest Swap usage on the memory tile and leaves it out without swap', () => {
+    const html = renderToStaticMarkup(<StateHistoryPanel points={points} range="1d" />)
+    const memoryTile = html.slice(html.indexOf('data-metric="memory"'), html.indexOf('data-metric="disk"'))
+    expect(memoryTile).toContain('resource-metric-extra')
+    expect(memoryTile).toContain('<em class="resource-metric-extra"><span>Swap 0.50</span> / <span>2.0 KB</span></em>')
+    const extra = memoryTile.match(/<em class="resource-metric-extra">(.*?)<\/em>/)?.[1]
+    expect(extra?.replace(/<[^>]+>/g, '')).toBe('Swap 0.50 / 2.0 KB')
+    expect(memoryTile).toMatch(/title="[^"]*Swap 25(\.0)?% · 0\.50 \/ 2\.0 KB"/)
+
+    const noSwap = points.map((point) => ({ ...point, swapUsedBytes: 0, swapTotalBytes: 0 }))
+    const noSwapHtml = renderToStaticMarkup(<StateHistoryPanel points={noSwap} range="1d" />)
+    const noSwapTile = noSwapHtml.slice(noSwapHtml.indexOf('data-metric="memory"'), noSwapHtml.indexOf('data-metric="disk"'))
+    expect(noSwapTile).not.toContain('Swap')
+  })
+
+  it.each([
+    { used: 802304000, amount: '0.75' },
+    { used: 153 * 1024 ** 2, amount: '0.15' },
+  ])('groups fractional Swap $amount and its total with unit without changing the displayed data', ({ used, amount }) => {
+    const withSwap = points.map((point) => ({ ...point, swapUsedBytes: used, swapTotalBytes: 2147479552 }))
+    const html = renderToStaticMarkup(<StateHistoryPanel points={withSwap} range="1d" />)
+    const memoryTile = html.slice(html.indexOf('data-metric="memory"'), html.indexOf('data-metric="disk"'))
+    const extra = memoryTile.match(/<em class="resource-metric-extra">(.*?)<\/em>/)?.[1]
+    expect(extra).toBe(`<span>Swap ${amount}</span> / <span>2.0 GB</span>`)
+    expect(extra?.replace(/<[^>]+>/g, '')).toBe(`Swap ${amount} / 2.0 GB`)
+    expect(memoryTile).toContain('<strong>50.0%</strong><em>2.0 KB / 4.0 KB</em>')
   })
 
   it('opens with the 原始 / 平滑 switch on 平滑', () => {

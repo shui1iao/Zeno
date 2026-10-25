@@ -1127,6 +1127,38 @@ svg { display: block; }
 @media (min-width: 768px) {
   .latency-target-grid.resource-metric-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 }
+/* Keep resource tiles content-sized with compact vertical insets, rather than
+   the latency tiles' minimum height. Titles stay at the top; shorter value
+   blocks still centre in the space below them. */
+.latency-target-grid.resource-metric-grid button {
+  min-height: 0;
+  justify-content: flex-start;
+  gap: 0;
+  padding-top: 8px;
+  padding-bottom: 6px;
+}
+.latency-target-grid .resource-metric-body {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding-top: 4px;
+  overflow: visible;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: normal;
+}
+/* Preserve the usage groups (especially total + unit) when Swap wraps. */
+.latency-target-grid.resource-metric-grid .resource-metric-extra > span {
+  width: auto;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+}
 .resource-chart-line { fill: none; stroke-width: 1; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 
 .latency-target-grid {
@@ -1447,6 +1479,12 @@ svg { display: block; }
     gap: 3px;
     padding: 9px 10px;
     text-align: left;
+  }
+  .latency-target-grid.resource-metric-grid button { padding-top: 6px; padding-bottom: 5px; }
+  .latency-target-grid.resource-metric-grid .resource-metric-extra {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
   }
   .latency-target-grid button[data-mobile-last-row='true'] {
     border-bottom: 0;

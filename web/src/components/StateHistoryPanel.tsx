@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import type { StatePoint } from '../types'
 import { formatBps, formatBytes, formatPercent, missingValue } from '../lib/format'
 import { availableHistoryRanges } from '../lib/historyRange'
@@ -28,6 +28,10 @@ export interface ResourceMetric {
   value: string
   /** Second line on the metric tile. */
   detail: string
+  /** Optional third line, e.g. Swap under memory. */
+  extra?: string
+  /** Longer form of `extra` for the tile title. */
+  extraTitle?: string
 }
 
 // The metric tiles reuse the latency target grid; six fit one desktop row.
@@ -91,15 +95,27 @@ export function StateHistoryPanel({ points, range, loading = false, error, canUs
                   data-desktop-last-row={index >= Math.floor((total - 1) / DESKTOP_METRIC_COLUMNS) * DESKTOP_METRIC_COLUMNS}
                   data-mobile-full-row-end={(index + 1) % MOBILE_METRIC_COLUMNS === 0}
                   data-mobile-last-row={index >= Math.floor((total - 1) / MOBILE_METRIC_COLUMNS) * MOBILE_METRIC_COLUMNS}
-                  title={[metric.title, metric.value, metric.detail].filter(Boolean).join(' · ')}
+                  title={[metric.title, metric.value, metric.detail, metric.extraTitle || metric.extra].filter(Boolean).join(' · ')}
                   onClick={() => toggleMetric(metric.key)}
                 >
                   <span className="latency-target-name">
                     <i className="latency-target-color" style={{ backgroundColor: metric.series[0]?.color }} aria-hidden="true" />
                     <span>{metric.title}</span>
                   </span>
-                  <strong>{metric.value}</strong>
-                  {metric.detail && <em>{metric.detail}</em>}
+                  <span className="resource-metric-body">
+                    <strong>{metric.value}</strong>
+                    {metric.detail && <em>{metric.detail}</em>}
+                    {metric.extra && (
+                      <em className="resource-metric-extra">
+                        {metric.extra.split(' / ').map((part, partIndex) => (
+                          <Fragment key={partIndex}>
+                            {partIndex > 0 && ' / '}
+                            <span>{part}</span>
+                          </Fragment>
+                        ))}
+                      </em>
+                    )}
+                  </span>
                 </button>
               )
             })}
@@ -212,7 +228,7 @@ function buildResourceMetrics(points: StatePoint[]): ResourceMetric[] {
       series: [{ key: 'cpu', label: 'CPU', color: 'var(--metric-green)', values: cpu, describe: percentAt(cpu) }],
       extraRows: [{ label: '负载', describe: (index) => formatLoad(points[index]) }],
       value: latestOf(cpu, percentAt(cpu)),
-      detail: (() => { const load = latestPoint(formatLoad); return load ? `负载 ${load}` : '' })(),
+      detail: latestPoint(formatLoad),
     },
     {
       key: 'memory',
@@ -221,6 +237,10 @@ function buildResourceMetrics(points: StatePoint[]): ResourceMetric[] {
       series: memorySeries,
       value: latestOf(memory, percentAt(memory)),
       detail: latestPoint((point) => { const pair = formatResourceValue(point.memoryUsedBytes, point.memoryTotalBytes); return pair === missingValue ? null : pair }),
+      // The tile shows the usage; the hover/long-press title and the chart
+      // tooltip add the percentage.
+      extra: hasSwap ? latestPoint((point) => formatSwap(point, false)) : '',
+      extraTitle: hasSwap ? latestPoint((point) => formatSwap(point, true)) : '',
     },
     {
       key: 'disk',
@@ -238,8 +258,8 @@ function buildResourceMetrics(points: StatePoint[]): ResourceMetric[] {
         { key: 'net-out', label: '上传', color: 'var(--metric-orange)', values: netOut, describe: rateAt(netOut) },
         { key: 'net-in', label: '下载', color: '#eab308', values: netIn, describe: rateAt(netIn) },
       ],
-      value: `↑ ${latestOf(netOut, rateAt(netOut))}`,
-      detail: `↓ ${latestOf(netIn, rateAt(netIn))}`,
+      value: `↓ ${latestOf(netIn, rateAt(netIn))}`,
+      detail: `↑ ${latestOf(netOut, rateAt(netOut))}`,
     },
     {
       key: 'processes',
@@ -261,6 +281,30 @@ function buildResourceMetrics(points: StatePoint[]): ResourceMetric[] {
       detail: '',
     },
   ]
+}
+
+function formatSwap(point: StatePoint, withPercent: boolean): string | null {
+  const percent = ratioPercent(point.swapUsedBytes, point.swapTotalBytes)
+  if (percent === null) return null
+  const pair = compactBytePair(point.swapUsedBytes, point.swapTotalBytes)
+  return withPercent ? `Swap ${formatPercent(percent)} · ${pair}` : `Swap ${pair}`
+}
+
+/**
+ * Narrow-tile form of used / total: the used side is written in the total's
+ * unit, so the unit appears once ("1.1 / 2.0 GB", "0.14 / 2.0 GB").
+ */
+function compactBytePair(used: number | null, total: number | null): string {
+  const safeUsed = finiteOrNull(used)
+  const safeTotal = finiteOrNull(total)
+  if (safeUsed === null || safeTotal === null || safeTotal <= 0) return formatResourceValue(used, total)
+  const totalText = formatBytes(safeTotal)
+  const unit = totalText.split(' ')[1]
+  const power = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'].indexOf(unit)
+  if (power < 0) return formatResourceValue(used, total)
+  const scaled = safeUsed / 1024 ** power
+  const usedText = power === 0 ? String(Math.round(scaled)) : scaled > 0 && scaled < 1 ? scaled.toFixed(2) : scaled.toFixed(1)
+  return `${usedText} / ${totalText}`
 }
 
 function formatLoad(point: StatePoint): string | null {

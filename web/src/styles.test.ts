@@ -641,6 +641,45 @@ describe('state history layout', () => {
     expect(detailStyles).not.toContain('.detail-range-bar')
   })
 
+  it('compacts only resource tile insets without fixing height or changing type, dividers or centring', () => {
+    const root = postcss.parse(baseStyles)
+    const declarationsFor = (selector, mobile = false) => {
+      const matches = []
+      root.walkRules(selector, (rule) => {
+        if (mobile ? rule.parent.type === 'atrule' && rule.parent.params === '(max-width: 767px)' : rule.parent.type === 'root') matches.push(rule)
+      })
+      expect(matches).toHaveLength(1)
+      return Object.fromEntries(matches[0].nodes.filter((node) => node.type === 'decl').map((node) => [node.prop, node.value]))
+    }
+    // Only these vertical properties differ from the shared latency buttons.
+    expect(declarationsFor('.latency-target-grid.resource-metric-grid button')).toEqual({
+      'min-height': '0', 'justify-content': 'flex-start', gap: '0', 'padding-top': '8px', 'padding-bottom': '6px',
+    })
+    expect(declarationsFor('.latency-target-grid.resource-metric-grid button', true)).toEqual({ 'padding-top': '6px', 'padding-bottom': '5px' })
+    expect(declarationsFor('.latency-target-grid .resource-metric-body')).toMatchObject({
+      flex: '1 1 auto', 'justify-content': 'center', gap: '3px', 'padding-top': '4px', overflow: 'visible',
+    })
+    expect(declarationsFor('.latency-target-grid button')).toMatchObject({ 'min-height': '76px', padding: '12px 14px' })
+    expect(declarationsFor('.latency-target-grid button', true)).toMatchObject({ 'min-height': '66px', padding: '9px 10px' })
+  })
+
+  it('wraps only mobile Swap usage while keeping its numeric groups and inherited typography intact', () => {
+    const rules = []
+    postcss.parse(baseStyles).walkRules((rule) => {
+      if (rule.selector.includes('.resource-metric-extra')) rules.push(rule)
+    })
+    const declarations = (rule) => Object.fromEntries(rule.nodes.filter((node) => node.type === 'decl').map((node) => [node.prop, node.value]))
+    expect(rules).toHaveLength(2)
+    const row = rules.find((rule) => rule.selector === '.latency-target-grid.resource-metric-grid .resource-metric-extra')
+    expect(row.parent.name).toBe('media')
+    expect(row.parent.params).toBe('(max-width: 767px)')
+    // No font reduction, forced height, scrolling or layout changes to other rows.
+    expect(declarations(row)).toEqual({ overflow: 'visible', 'text-overflow': 'clip', 'white-space': 'normal' })
+    const groups = rules.find((rule) => rule.selector === '.latency-target-grid.resource-metric-grid .resource-metric-extra > span')
+    expect(groups.parent.type).toBe('root')
+    expect(declarations(groups)).toEqual({ width: 'auto', color: 'inherit', font: 'inherit', 'white-space': 'nowrap' })
+  })
+
   it('keeps only the server status as a compact pill in the top server card', () => {
     expect(styles).toContain('.detail-hero__badges')
     expect(styles).toContain('border-radius: var(--radius-pill)')
