@@ -296,20 +296,41 @@
 .admin-alert-rule-section .admin-list-main strong { color: var(--foreground); }
 .admin-node-section .admin-list-head,
 .admin-node-section .admin-list-row {
-  grid-template-columns: minmax(190px, 1.18fr) minmax(230px, 1.12fr) minmax(120px, 120px) minmax(84px, auto);
+  grid-template-columns: minmax(120px, 200px) minmax(14px, .5fr) 240px minmax(14px, 1fr) 90px minmax(14px, .5fr) 96px;
 }
 .admin-target-list .admin-list-head,
 .admin-target-list .admin-list-row {
   /* Fixed action column: header and rows are separate grids, so an "auto"
      track would size differently in each and break centre alignment. */
-  grid-template-columns: minmax(170px, 1.12fr) minmax(170px, 1fr) minmax(120px, .72fr) minmax(96px, 120px);
+  grid-template-columns: minmax(120px, 170px) minmax(14px, .5fr) 210px minmax(14px, 1fr) 120px minmax(14px, .5fr) 96px;
 }
 .admin-notification-list .admin-list-head,
 .admin-notification-list .admin-list-row,
 .admin-alert-rule-list .admin-list-head,
 .admin-alert-rule-list .admin-list-row {
-  /* Same three columns in both notification tables so 状态 and 操作 line up. */
-  grid-template-columns: minmax(180px, 1fr) minmax(96px, 140px) minmax(96px, 120px);
+  /* Same columns in both notification tables so 状态 and 操作 line up.
+     Equal outer tracks keep 状态 in the middle of the row. */
+  grid-template-columns: minmax(160px, 1fr) 90px minmax(110px, 1fr);
+}
+/* Desktop tables: the spare width goes into explicit empty tracks (so
+   column-gap is zero) - a narrow one after the name, a wide one in the
+   middle and a narrow one before 操作, which stays at the right edge. The
+   notification tables keep 状态 centred and 操作 at the right edge. */
+@media (min-width: 768px) {
+  .admin-node-section .admin-list-head, .admin-node-section .admin-list-row,
+  .admin-target-list .admin-list-head, .admin-target-list .admin-list-row,
+  .admin-notification-list .admin-list-head, .admin-notification-list .admin-list-row,
+  .admin-alert-rule-list .admin-list-head, .admin-alert-rule-list .admin-list-row { column-gap: 0; }
+  .admin-node-section .admin-list-head > :nth-child(2), .admin-node-section .admin-list-row > :nth-child(2),
+  .admin-target-list .admin-list-head > :nth-child(2), .admin-target-list .admin-list-row > :nth-child(2) { grid-column: 3; }
+  .admin-node-section .admin-list-head > :nth-child(3), .admin-node-section .admin-list-row > :nth-child(3),
+  .admin-target-list .admin-list-head > :nth-child(3), .admin-target-list .admin-list-row > :nth-child(3) { grid-column: 5; }
+  .admin-notification-list .admin-list-head > span:last-child,
+  .admin-alert-rule-list .admin-list-head > span:last-child { justify-self: end; width: 96px; text-align: center; }
+  .admin-notification-list .admin-list-row > .admin-row-actions,
+  .admin-alert-rule-list .admin-list-row > .admin-row-actions { justify-self: end; width: 96px; justify-content: center; }
+  .admin-node-section .admin-list-head > :nth-child(4), .admin-node-section .admin-list-row > :nth-child(4),
+  .admin-target-list .admin-list-head > :nth-child(4), .admin-target-list .admin-list-row > :nth-child(4) { grid-column: 7; }
 }
 .admin-notification-list .admin-row-actions.admin-icon-actions {
   flex-wrap: wrap;

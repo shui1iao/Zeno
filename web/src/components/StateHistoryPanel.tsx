@@ -4,6 +4,8 @@ import { formatBps, formatBytes, formatPercent, missingValue } from '../lib/form
 import { availableHistoryRanges } from '../lib/historyRange'
 import { lastFiniteIndex, maxFinite, type ResourceScale } from '../lib/resourceChart'
 import { HistoryRangeSelector } from './HistoryRangeSelector'
+import { SmoothingSelector, type SmoothingMode } from './SmoothingSelector'
+import { smoothStatePoints } from '../lib/smoothStatePoints'
 import { latencyTargetCorners } from '../lib/targetGridCorners'
 import { ResourceChart, type ResourceChartExtraRow, type ResourceChartSeries } from './ResourceChart'
 
@@ -37,9 +39,16 @@ export function StateHistoryPanel({ points, range, loading = false, error, canUs
   const sorted = useMemo(() => sortStatePoints(points), [points])
   const timestamps = useMemo(() => sorted.map((point) => Date.parse(point.ts)), [sorted])
   const metrics = useMemo(() => buildResourceMetrics(sorted), [sorted])
+  // Unlike the latency chart, the resource chart opens smoothed. The tiles keep
+  // the real latest values; only the drawn lines (and their tooltips) change.
+  const [smoothing, setSmoothing] = useState<SmoothingMode>('smooth')
+  const chartMetrics = useMemo(
+    () => (smoothing === 'smooth' ? buildResourceMetrics(smoothStatePoints(sorted)) : metrics),
+    [smoothing, sorted, metrics],
+  )
   // Like the latency targets: nothing selected means every metric is drawn.
   const [selectedKeys, setSelectedKeys] = useState<string[]>([])
-  const view = useMemo(() => buildChartView(metrics, selectedKeys), [metrics, selectedKeys])
+  const view = useMemo(() => buildChartView(chartMetrics, selectedKeys), [chartMetrics, selectedKeys])
   const toggleMetric = (key: string) => setSelectedKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]))
   const sampleCount = sorted.length
   const total = metrics.length
@@ -47,7 +56,10 @@ export function StateHistoryPanel({ points, range, loading = false, error, canUs
   return (
     <section className="monitor-panel resource-history-panel" aria-label="agent state history">
       <header className="resource-history-header">
-        <h3>系统资源趋势</h3>
+        <div className="monitor-title-row">
+          <h3>系统资源趋势</h3>
+          <SmoothingSelector value={smoothing} onChange={setSmoothing} ariaLabel="资源曲线平滑" />
+        </div>
         <HistoryRangeSelector
           ariaLabel="resource history range selector"
           options={rangeOptions}
@@ -93,7 +105,7 @@ export function StateHistoryPanel({ points, range, loading = false, error, canUs
             })}
           </div>
           <ResourceChart
-            key={view.key}
+            key={`${view.key}:${smoothing}`}
             label={view.label}
             scale={view.scale}
             series={view.series}

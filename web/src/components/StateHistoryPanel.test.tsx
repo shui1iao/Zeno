@@ -104,6 +104,13 @@ describe('StateHistoryPanel', () => {
     expect(all.series.find((item) => item.key === 'net-in')?.plot).toEqual([25, null])
   })
 
+  it('opens with the 原始 / 平滑 switch on 平滑', () => {
+    const html = renderToStaticMarkup(<StateHistoryPanel points={points} range="1d" />)
+    const switchHtml = html.slice(html.indexOf('aria-label="资源曲线平滑"'), html.indexOf('resource history range selector'))
+    expect(switchHtml).toContain('原始')
+    expect(switchHtml).toMatch(/aria-(pressed|checked|selected)="true"[^>]*>(<[^>]+>)*平滑/)
+  })
+
   it('breaks the line across an offline gap instead of bridging it', () => {
     const base = Date.parse('2026-07-02T12:00:00Z')
     const gapped = [0, 1, 2, 3, 30, 31, 32].map((minute) => ({ ...points[0], ts: new Date(base + minute * 60_000).toISOString() }))
