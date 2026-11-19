@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ComponentType } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react'
 import { ServerCard } from './components/ServerCard'
 import { applyCustomCode } from './lib/customCode'
 import { availableCurrencyOptions, billingCycleMonths, convertCurrencyAmount, normalizeCurrencyRates, rememberHomeCurrency, storedHomeCurrency, type CurrencyCode, type CurrencyRates } from './lib/currency'
@@ -10,7 +10,7 @@ import { useAdminAccess } from './hooks/useAdminAccess'
 import { usePublicSettings } from './hooks/usePublicSettings'
 import { useDashboardRouter } from './hooks/useDashboardRouter'
 import { homeRealtimeSnapshotForNodes, useSummaryController } from './hooks/useSummaryController'
-import { HomeRegionFilter, HomeTopPanel } from './components/HomeOverviewPanel'
+import { HomeRegionFilter, HomeTopPanel, rememberHomeView, storedHomeView, type HomeView } from './components/HomeOverviewPanel'
 import type { AdminDashboardContainerProps } from './components/admin/AdminDashboard'
 import type { NodeDetailRouteProps } from './components/NodeDetailRoute'
 import type { DashboardRoute } from './lib/route'
@@ -30,6 +30,7 @@ const loadAdminDashboardModule = () => import('./components/admin/AdminDashboard
 const loadAdminDashboard = () => loadAdminDashboardModule().then((module) => ({ default: module.AdminDashboardContainer }))
 const loadNodeDetailRouteModule = () => import('./components/NodeDetailRoute')
 const LazyAdminDashboard = lazy(loadAdminDashboard)
+const LazyServerListView = lazy(() => import('./components/ServerList'))
 const LazyNodeDetailRoute = lazy(() => loadNodeDetailRouteModule().then((module) => ({ default: module.NodeDetailRoute })))
 let preloadedAdminDashboard: ComponentType<AdminDashboardContainerProps> | null = null
 let preloadedNodeDetailRoute: ComponentType<NodeDetailRouteProps> | null = null
@@ -169,6 +170,15 @@ export function homeRegionOptions(nodes: HomeCardNode[]): string[] {
   return regions
 }
 
+export function homeRegionCounts(nodes: HomeCardNode[]): Record<string, number> {
+  const counts: Record<string, number> = { ALL: nodes.length }
+  nodes.forEach((node) => {
+    const region = normalizeHomeRegion(node.countryCode)
+    if (region !== '') counts[region] = (counts[region] ?? 0) + 1
+  })
+  return counts
+}
+
 export function filterHomeNodesByRegion(nodes: HomeCardNode[], region: string): HomeCardNode[] {
   if (region === 'ALL') return nodes
   return nodes.filter((node) => normalizeHomeRegion(node.countryCode) === region)
@@ -186,6 +196,7 @@ export function App() {
   const { state, summaryRef, homeRealtimeSnapshot } = useSummaryController()
   const [homeRegion, setHomeRegion] = useState('ALL')
   const [homeCurrency, setHomeCurrency] = useState<CurrencyCode>(storedHomeCurrency)
+  const [homeView, setHomeView] = useState<HomeView>(storedHomeView)
   const { route, navigateHome, navigateAdmin, navigateNode } = useDashboardRouter()
   const { settings, settingsReady, setSettings } = usePublicSettings()
   const { adminToken, setAdminToken, expireAdminSession } = useAdminAccess()
@@ -201,9 +212,13 @@ export function App() {
   const [themeOverride, setThemeOverride] = useState<AdminTheme | null>(() => storedThemeOverride())
   const [backgroundEnabled, setBackgroundEnabled] = useState(() => storedBackgroundEnabled())
   const backgroundEnabledRef = useRef(backgroundEnabled)
-  const effectiveSettings = settingsForChrome(settings, themeOverride, backgroundEnabled)
+  const effectiveSettings = useMemo(
+    () => settingsForChrome(settings, themeOverride, backgroundEnabled),
+    [settings, themeOverride, backgroundEnabled],
+  )
+  const activeTheme = useDocumentTheme(effectiveSettings)
+  const shellStyle = useMemo(() => shellStyleForSettings(effectiveSettings), [effectiveSettings, activeTheme])
   const nodeRouteId = route.kind === 'node' ? route.nodeId : null
-  useDocumentTheme(effectiveSettings)
 
   const adoptPreloadedNodeDetailRoute = useCallback(() => {
     if (preloadedNodeDetailRoute) setNodeDetailRouteComponent(() => preloadedNodeDetailRoute as ComponentType<NodeDetailRouteProps>)
@@ -300,52 +315,63 @@ export function App() {
     }
   }, [settingsReady, settings.backgroundUrl, settings.desktopBackgroundUrl, settings.mobileBackgroundUrl])
 
-  const setThemeMode = (nextTheme: AdminTheme) => {
+  const setThemeMode = useCallback((nextTheme: AdminTheme) => {
     window.localStorage.setItem('zeno_theme_override', nextTheme)
     setThemeOverride(nextTheme)
-  }
+  }, [])
 
-  const toggleBackground = () => {
+  const toggleBackground = useCallback(() => {
     const nextValue = !backgroundEnabledRef.current
     backgroundEnabledRef.current = nextValue
     window.localStorage.setItem('zeno_background_enabled', String(nextValue))
     setBackgroundEnabled(nextValue)
-  }
+  }, [])
 
   const backgroundConfigured = (settings.desktopBackgroundUrl || settings.backgroundUrl || settings.mobileBackgroundUrl).trim() !== ''
   const backgroundToggle = settingsReady && backgroundConfigured && (!backgroundEnabled || backgroundAssetsReady) ? toggleBackground : undefined
   const nodes = state.kind === 'ready' ? state.data.nodes : []
+  const rawExchangeRates = state.kind === 'ready' ? state.data.exchangeRates : null
+  const servicesKey = state.kind === 'ready' ? state.data.services.map((service) => service.id).join('\n') : ''
+  const targetOrder = useMemo(
+    () => (servicesKey === '' ? undefined : servicesKey.split('\n')),
+    [servicesKey],
+  )
   const homeRealtimeNodes = homeRealtimeSnapshot?.nodes ?? nodes
-  const homeNodes = orderHomeNodes(homeRealtimeNodes)
-  const homeRegions = homeRegionOptions(homeNodes)
+  const homeNodes = useMemo(() => orderHomeNodes(homeRealtimeNodes), [homeRealtimeNodes])
+  const homeRegions = useMemo(() => homeRegionOptions(homeNodes), [homeNodes])
+  const homeRegionCountMap = useMemo(() => homeRegionCounts(homeNodes), [homeNodes])
   const activeHomeRegion = homeRegion === 'ALL' || homeRegions.includes(homeRegion) ? homeRegion : 'ALL'
-  const visibleHomeNodes = filterHomeNodesByRegion(homeNodes, activeHomeRegion)
-  const exchangeRates = normalizeCurrencyRates(state.kind === 'ready' ? state.data.exchangeRates : null)
-  const homeCurrencyOptions = availableCurrencyOptions(exchangeRates)
+  const visibleHomeNodes = useMemo(() => filterHomeNodesByRegion(homeNodes, activeHomeRegion), [homeNodes, activeHomeRegion])
+  const exchangeRates = useMemo(() => normalizeCurrencyRates(rawExchangeRates), [rawExchangeRates])
+  const homeCurrencyOptions = useMemo(() => availableCurrencyOptions(exchangeRates), [exchangeRates])
   const activeHomeCurrency = homeCurrencyOptions.some((option) => option.value === homeCurrency) ? homeCurrency : 'CNY'
   const selectedNode = route.kind === 'node' ? nodes.find((node) => node.id === route.nodeId) : undefined
   const totalCount = homeRealtimeNodes.length
-  const onlineCount = homeRealtimeNodes.filter((node) => node.status === 'online').length
-  const offlineCount = homeRealtimeNodes.filter((node) => node.status === 'offline').length
-  const { totalUp, totalDown } = homeTrafficTotalsForNodes(homeRealtimeNodes)
-  const monthlyCost = homeMonthlyCostForNodes(homeRealtimeNodes, activeHomeCurrency, exchangeRates)
+  const onlineCount = useMemo(() => homeRealtimeNodes.filter((node) => node.status === 'online').length, [homeRealtimeNodes])
+  const offlineCount = useMemo(() => homeRealtimeNodes.filter((node) => node.status === 'offline').length, [homeRealtimeNodes])
+  const { totalUp, totalDown } = useMemo(() => homeTrafficTotalsForNodes(homeRealtimeNodes), [homeRealtimeNodes])
+  const monthlyCost = useMemo(() => homeMonthlyCostForNodes(homeRealtimeNodes, activeHomeCurrency, exchangeRates), [homeRealtimeNodes, activeHomeCurrency, exchangeRates])
   const currentRealtimeSnapshot = homeRealtimeSnapshot ?? homeRealtimeSnapshotForNodes(homeRealtimeNodes)
   const upSpeed = currentRealtimeSnapshot.upSpeed
   const downSpeed = currentRealtimeSnapshot.downSpeed
   const hasBackgroundImage = (effectiveSettings.desktopBackgroundUrl || effectiveSettings.backgroundUrl || effectiveSettings.mobileBackgroundUrl).trim() !== ''
-  const changeHomeCurrency = (currency: CurrencyCode) => {
+  const changeHomeCurrency = useCallback((currency: CurrencyCode) => {
     rememberHomeCurrency(currency)
     setHomeCurrency(currency)
-  }
-  const preloadAdmin = () => {
+  }, [])
+  const changeHomeView = useCallback((view: HomeView) => {
+    rememberHomeView(view)
+    setHomeView(view)
+  }, [])
+  const preloadAdmin = useCallback(() => {
     return preloadAdminRoute()
       .then(() => {
         if (!preloadedAdminDashboard) return
         setAdminDashboardRoute(() => preloadedAdminDashboard as ComponentType<AdminDashboardContainerProps>)
         setAdminSurfaceMounted(true)
       })
-  }
-  const navigateAdminSmoothly = () => {
+  }, [])
+  const navigateAdminSmoothly = useCallback(() => {
     adminNavigationPendingRef.current = true
     void preloadAdmin()
       .then(() => {
@@ -358,8 +384,8 @@ export function App() {
         setAdminSurfaceMounted(true)
         navigateAdminRef.current()
       })
-  }
-  const preloadAdminIntent = () => { void preloadAdmin().catch(() => {}) }
+  }, [preloadAdmin])
+  const preloadAdminIntent = useCallback(() => { void preloadAdmin().catch(() => {}) }, [preloadAdmin])
   const preloadNodeIntent = useCallback((nodeId: string) => {
     // Prime the module cache without replacing an already mounted lazy route.
     void preloadNodeDetailRoute().catch(() => {})
@@ -388,7 +414,7 @@ export function App() {
   )
 
   return (
-    <main className="kulin-shell" data-theme={effectiveSettings.theme} data-appearance={effectiveSettings.appearancePreset} data-background={hasBackgroundImage ? 'on' : 'off'} style={shellStyleForSettings(effectiveSettings)}>
+    <main className="kulin-shell" data-theme={activeTheme} data-appearance={effectiveSettings.appearancePreset} data-background={hasBackgroundImage ? 'on' : 'off'} style={shellStyle}>
       <h1 className="sr-only page-heading">{pageHeading}</h1>
       {(adminSurfaceMounted || route.kind === 'admin') && (
         <div hidden={route.kind !== 'admin'} aria-hidden={route.kind !== 'admin'} data-admin-ready={adminSurfaceReady}>
@@ -422,6 +448,8 @@ export function App() {
             expireAdminSession={expireAdminSession}
             onBack={navigateHome}
             topHeader={publicHeader}
+            targetOrderOverride={targetOrder}
+            onAdmin={navigateAdminSmoothly}
           />
         </Suspense>
       )}
@@ -452,13 +480,21 @@ export function App() {
             onThemeChange={setThemeMode}
             onBackgroundToggle={backgroundToggle}
             backgroundEnabled={hasBackgroundImage}
+            nodes={homeNodes}
+            onOpenNode={navigateNode}
           />
 
-          <HomeRegionFilter regions={homeRegions} activeRegion={activeHomeRegion} onChange={setHomeRegion} />
+          <HomeRegionFilter regions={homeRegions} activeRegion={activeHomeRegion} onChange={setHomeRegion} counts={homeRegionCountMap} view={homeView} onViewChange={changeHomeView} />
 
-          <section className="server-card-list" aria-label="server cards">
-            {visibleHomeNodes.map((node) => <ServerCard key={node.id} node={node} serverCardTheme={effectiveSettings.serverCardTheme} displayCurrency={activeHomeCurrency} exchangeRates={exchangeRates} onOpen={navigateNode} onIntent={preloadNodeIntent} />)}
-          </section>
+          {homeView === 'list' ? (
+            <Suspense fallback={null}>
+              <LazyServerListView nodes={visibleHomeNodes} displayCurrency={activeHomeCurrency} exchangeRates={exchangeRates} onOpen={navigateNode} onIntent={preloadNodeIntent} />
+            </Suspense>
+          ) : (
+            <section className="server-card-list" aria-label="server cards">
+              {visibleHomeNodes.map((node) => <ServerCard key={node.id} node={node} serverCardTheme={effectiveSettings.serverCardTheme} displayCurrency={activeHomeCurrency} exchangeRates={exchangeRates} onOpen={navigateNode} onIntent={preloadNodeIntent} />)}
+            </section>
+          )}
         </div>
       )}
     </main>

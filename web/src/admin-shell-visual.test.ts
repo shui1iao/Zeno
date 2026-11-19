@@ -15,9 +15,10 @@ describe('admin login surface and top-card alignment', () => {
   })
 
   it('keeps the overview height stable while letting the unified admin card grow with its workspace', () => {
-    expect(adminShellStyles).toContain('.home-overview-card { height: 135px; }')
-    expect(adminShellStyles).toMatch(/\.admin-chrome-card\s*\{[^}]*min-height: 360px;[^}]*\}/)
-    expect(adminShellStyles).toMatch(/@media \(max-width: 767px\)\s*\{[\s\S]*?\.home-overview-card\s*\{\s*height: 180px;\s*\}[\s\S]*?\.admin-chrome-card\s*\{\s*height: auto; min-height: 0;\s*\}/)
+    expect(adminShellStyles).toContain('.home-overview-card { min-height: 126px; }')
+    expect(adminShellStyles).toMatch(/@media \(min-width: 768px\) and \(max-width: 1023px\)\s*\{\s*\.home-overview-card \{ min-height: 0; \}/)
+    expect(adminShellStyles).toMatch(/\.admin-content-card\s*\{[^}]*min-height: 360px;[^}]*\}/)
+    expect(adminShellStyles).toMatch(/@media \(max-width: 767px\)\s*\{[\s\S]*?\.home-overview-card \{ min-height: 0; \}[\s\S]*?\.admin-chrome-card \{ height: auto; min-height: 0; \}/)
   })
 
   it('keeps the phone admin navigation on one five-column row', () => {
@@ -26,9 +27,10 @@ describe('admin login surface and top-card alignment', () => {
     expect(adminShellStyles).not.toContain('.admin-chrome-card .admin-section-nav button:last-child')
   })
 
-  it('keeps the navigation divider aligned with the standard card content width', () => {
-    expect(adminShellStyles).toMatch(/\.admin-chrome-card \.admin-toolbar\s*\{[^}]*margin: 0;[^}]*border-top: 1px solid var\(--border\);[^}]*\}/)
-    expect(adminShellStyles).toMatch(/\.admin-chrome-card \.admin-section-nav\s*\{[^}]*top: 8px;[^}]*--selector-radius: var\(--radius-panel-inset-8\);[^}]*\}/)
-    expect(adminShellStyles).toMatch(/@media \(max-width: 767px\)\s*\{[\s\S]*?\.admin-chrome-card \.admin-toolbar\s*\{[^}]*margin-inline: 0;[^}]*\}[\s\S]*?\.admin-chrome-card \.admin-section-nav\s*\{[^}]*top: 0;[^}]*--selector-radius: var\(--radius-panel-inset-8\);[^}]*\}/)
+  it('uses a compact left-aligned section switcher without a bottom divider under navigation', () => {
+    expect(adminShellStyles).toMatch(/\.admin-chrome-card \.admin-toolbar\s*\{[^}]*justify-content: flex-start;[^}]*margin: 0 -18px;[^}]*border-top: 1px solid var\(--divider\);[^}]*\}/)
+    expect(adminShellStyles).not.toContain('border-bottom: 1px solid var(--divider)')
+    expect(adminShellStyles).toMatch(/\.admin-chrome-card \.admin-section-nav\s*\{[^}]*width: auto;[^}]*--selector-height: 36px;[^}]*--selector-radius: var\(--radius-field\);[^}]*grid-template-columns: repeat\(var\(--slider-columns\), minmax\(92px, auto\)\);[^}]*\}/)
+    expect(adminShellStyles).toMatch(/@media \(max-width: 767px\)\s*\{[\s\S]*?\.admin-chrome-card \.admin-toolbar\s*\{[^}]*margin-inline: -12px;[^}]*\}[\s\S]*?\.admin-chrome-card \.admin-section-nav\s*\{[^}]*width: 100%;[^}]*--selector-height: 34px;[^}]*\}/)
   })
 })

@@ -227,7 +227,11 @@ func notificationReconcileRules(ctx context.Context, tx *sql.Tx) ([]AdminAlertRu
 		return nil, err
 	}
 	for index := range rules {
-		rules[index].ScopeNodeIDs = scopes[rules[index].ID]
+		if scopeNodeIDs := scopes[rules[index].ID]; scopeNodeIDs != nil {
+			rules[index].ScopeNodeIDs = scopeNodeIDs
+		} else {
+			rules[index].ScopeNodeIDs = []string{}
+		}
 		if rules[index].Metric != "expiry_days" {
 			continue
 		}

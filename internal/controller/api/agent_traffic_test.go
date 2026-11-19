@@ -513,7 +513,7 @@ func TestTrafficLastSampleMigrationBackfillsLatestStateTimestamp(t *testing.T) {
 	if err := store.SeedPreviewData(ctx, PreviewSeedOptions{NodeID: "example-node-a", DisplayName: "Example Node A", CountryCode: "HK", AgentToken: "test-agent-token"}); err != nil {
 		t.Fatalf("seed preview data: %v", err)
 	}
-	now := time.Now().UTC().Truncate(time.Second)
+	now := time.Now().Truncate(time.Second)
 	for _, ts := range []int64{now.Add(-time.Minute).Unix(), now.Unix()} {
 		if _, err := store.db.ExecContext(ctx, `INSERT INTO state_samples (node_id, ts, cpu_percent) VALUES ('example-node-a', ?, 10)`, ts); err != nil {
 			t.Fatalf("insert historical state sample: %v", err)

@@ -21,12 +21,14 @@ describe('LatencyChart', () => {
     expect(html).not.toContain('丢包 25.00%')
   })
 
-  it('shows packet loss only for a single selected target, not when multiple latency lines are displayed', () => {
+  it('keeps the packet-loss area for a single selected target and a separate loss track for multiple lines', () => {
     const multiHtml = renderToStaticMarkup(<LatencyChart points={points} activeTargetIds={['alpha', 'beta']} />)
     const singleHtml = renderToStaticMarkup(<LatencyChart points={points} activeTargetIds={['alpha']} />)
 
     expect(multiHtml).not.toContain('packet-loss-area')
-    expect(multiHtml).not.toContain('丢包')
+    expect(multiHtml).not.toContain('Alpha 丢包')
+    expect(multiHtml).toContain('丢包轨道')
+    expect(multiHtml).toContain('latency-loss-bin is-')
     expect(singleHtml).toContain('packet-loss-area')
     expect(singleHtml).toContain('Alpha 丢包')
   })

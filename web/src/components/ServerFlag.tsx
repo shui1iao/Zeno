@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
 
 interface ServerFlagProps {
   countryCode?: string
@@ -24,34 +24,40 @@ function forceUseSvgFlag(): boolean {
   return (window as Window & { ForceUseSvgFlag?: boolean }).ForceUseSvgFlag === true
 }
 
-export function ServerFlag({ countryCode, className = '' }: ServerFlagProps) {
-  const flagCode = useMemo(() => normalizeFlagCode(countryCode), [countryCode])
-  const [supportsEmojiFlags, setSupportsEmojiFlags] = useState(false)
-  const shouldForceSvg = forceUseSvgFlag()
+let cachedEmojiFlagSupport: boolean | null = null
 
-  useEffect(() => {
-    if (shouldForceSvg) {
-      setSupportsEmojiFlags(false)
-      return
-    }
-
+function detectEmojiFlagSupport(): boolean {
+  if (typeof document === 'undefined') return false
+  if (cachedEmojiFlagSupport !== null) return cachedEmojiFlagSupport
+  try {
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
+    if (!ctx) {
+      cachedEmojiFlagSupport = false
+      return false
+    }
     ctx.fillStyle = '#000'
     ctx.textBaseline = 'top'
     ctx.font = '32px Arial'
     ctx.fillText('🇺🇸', 0, 0)
-    setSupportsEmojiFlags(ctx.getImageData(16, 16, 1, 1).data[3] !== 0)
-  }, [shouldForceSvg])
+    cachedEmojiFlagSupport = ctx.getImageData(16, 16, 1, 1).data[3] !== 0
+  } catch {
+    cachedEmojiFlagSupport = false
+  }
+  return cachedEmojiFlagSupport
+}
+
+export function ServerFlag({ countryCode, className = '' }: ServerFlagProps) {
+  const flagCode = useMemo(() => normalizeFlagCode(countryCode), [countryCode])
+  const shouldForceSvg = forceUseSvgFlag()
+  const supportsEmojiFlags = !shouldForceSvg && detectEmojiFlagSupport()
 
   if (!flagCode) return null
 
   return (
     <span className={`server-flag ${className}`.trim()} aria-label={`${flagCode} flag`}>
-      {shouldForceSvg || !supportsEmojiFlags ? (
-        <img className="server-flag__image" src={`/assets/flags/${flagCode.toLowerCase()}.svg`} alt="" loading="lazy" decoding="async" />
+      {!supportsEmojiFlags ? (
+        <img className="server-flag__image" src={`/assets/flags/${flagCode.toLowerCase()}.svg`} alt="" />
       ) : (
         unicodeFlagIcon(flagCode)
       )}

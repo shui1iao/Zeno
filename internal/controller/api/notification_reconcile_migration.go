@@ -15,7 +15,7 @@ const notificationReconcileSeedMigration = "20261008_notification_reconcile_seed
 
 func (s *SQLiteStore) seedNotificationStatesFromLegacy(ctx context.Context) error {
 	return s.runValidatedSchemaMigration(ctx, notificationReconcileSeedMigration, nil, func(migrationCtx context.Context) error {
-		return seedNotificationStatesTx(migrationCtx, s.db, time.Now().UTC())
+		return seedNotificationStatesTx(migrationCtx, s.db, time.Now())
 	})
 }
 
@@ -206,7 +206,7 @@ func seedRenewalNotificationKeyTx(ctx context.Context, tx *sql.Tx, node notifica
 	if !ok {
 		return key, nil
 	}
-	mark := renewalNotificationMark(dateOnlyUTC(now.UTC()).Format("2006-01-02"), dueText)
+	mark := renewalNotificationMark(dateOnlyUTC(now).Format("2006-01-02"), dueText)
 	var exists int
 	err := tx.QueryRowContext(ctx, `
 		SELECT 1 FROM notification_event_marks

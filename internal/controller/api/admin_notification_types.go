@@ -1,11 +1,20 @@
 package api
 
 import (
+	"encoding/json"
 	"strings"
 )
 
 type AdminNotificationChannelsResponse struct {
 	Channels []AdminNotificationChannel `json:"channels"`
+}
+
+func (response AdminNotificationChannelsResponse) MarshalJSON() ([]byte, error) {
+	type alias AdminNotificationChannelsResponse
+	if response.Channels == nil {
+		response.Channels = []AdminNotificationChannel{}
+	}
+	return json.Marshal(alias(response))
 }
 
 type AdminNotificationChannelResponse struct {
@@ -18,6 +27,14 @@ type AdminNotificationTypeResponse struct {
 
 type AdminAlertRulesResponse struct {
 	Rules []AdminAlertRule `json:"rules"`
+}
+
+func (response AdminAlertRulesResponse) MarshalJSON() ([]byte, error) {
+	type alias AdminAlertRulesResponse
+	if response.Rules == nil {
+		response.Rules = []AdminAlertRule{}
+	}
+	return json.Marshal(alias(response))
 }
 
 type AdminAlertRuleResponse struct {
@@ -130,6 +147,14 @@ type AdminAlertRule struct {
 	ScopeNodeIDs          []string `json:"scope_node_ids"`
 	CreatedAt             string   `json:"created_at"`
 	UpdatedAt             string   `json:"updated_at"`
+}
+
+func (rule AdminAlertRule) MarshalJSON() ([]byte, error) {
+	type alias AdminAlertRule
+	if rule.ScopeNodeIDs == nil {
+		rule.ScopeNodeIDs = []string{}
+	}
+	return json.Marshal(alias(rule))
 }
 
 type AdminNotificationChannel struct {

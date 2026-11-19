@@ -5,7 +5,7 @@ export interface LatencyTargetSummary {
   targetName: string
   sampleCount: number
   avgMs: number | null
-  lossPercent: number
+  lossPercent: number | null
 }
 
 interface Accumulator {
@@ -52,7 +52,7 @@ export function summarizeLatencyTargets(points: LatencyPoint[]): LatencyTargetSu
     targetName: acc.targetName,
     sampleCount: acc.sampleCount,
     avgMs: acc.latestDelay !== null ? round2(acc.latestDelay) : null,
-    lossPercent: acc.lossCount > 0 ? round2(acc.lossTotal / acc.lossCount) : 0,
+    lossPercent: acc.lossCount > 0 ? round2(acc.lossTotal / acc.lossCount) : null,
   }))
 }
 

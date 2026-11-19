@@ -150,12 +150,19 @@ func previewTarget(id, name, address string, port int) ProbeTarget {
 	}
 }
 
+func (s *sqliteAgentDomain) queryReadDB() *sql.DB {
+	if s.readDB != nil {
+		return s.readDB
+	}
+	return s.db
+}
+
 func (s *sqliteAgentDomain) EnabledProbeTargets(ctx context.Context, nodeID string) ([]ProbeTarget, error) {
-	return enabledProbeTargetsQuery(ctx, s.db, nodeID)
+	return enabledProbeTargetsQuery(ctx, s.queryReadDB(), nodeID)
 }
 
 func (s *sqliteAgentDomain) EnabledProbeTargetsWithConfigVersion(ctx context.Context, nodeID string) ([]ProbeTarget, int64, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.queryReadDB().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, 0, err
 	}

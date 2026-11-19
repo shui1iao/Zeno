@@ -123,10 +123,9 @@ func upsertMonthlyTraffic(ctx context.Context, tx *sql.Tx, nodeID, month string,
 
 	deltaIn := nonNegativeDelta(previousIn, inTotal)
 	deltaOut := nonNegativeDelta(previousOut, outTotal)
-	billable := billableTrafficDelta(billingMode, deltaIn, deltaOut)
 	aggregateIn = saturatingAddNonNegativeInt64(aggregateIn, deltaIn)
 	aggregateOut = saturatingAddNonNegativeInt64(aggregateOut, deltaOut)
-	aggregateBillable = saturatingAddNonNegativeInt64(aggregateBillable, billable)
+	aggregateBillable = billableTrafficAggregate(billingMode, aggregateIn, aggregateOut)
 	_, err = tx.ExecContext(ctx, `
 		UPDATE traffic_monthly
 		SET in_bytes = ?,
@@ -170,18 +169,22 @@ func nonNegativeDelta(previous sql.NullInt64, current int64) int64 {
 }
 
 func billableTrafficDelta(mode string, deltaIn, deltaOut int64) int64 {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "in", "download", "inbound":
-		return deltaIn
-	case "out", "upload", "outbound":
-		return deltaOut
-	case "max", "higher":
-		if deltaIn > deltaOut {
-			return deltaIn
+	return billableTrafficAggregate(mode, deltaIn, deltaOut)
+}
+
+func billableTrafficAggregate(mode string, totalIn, totalOut int64) int64 {
+	switch normalizeTrafficBillingMode(mode) {
+	case "in":
+		return totalIn
+	case "out":
+		return totalOut
+	case "max":
+		if totalIn > totalOut {
+			return totalIn
 		}
-		return deltaOut
+		return totalOut
 	default:
-		return saturatingAddNonNegativeInt64(deltaIn, deltaOut)
+		return saturatingAddNonNegativeInt64(totalIn, totalOut)
 	}
 }
 
@@ -197,15 +200,16 @@ type billingPeriod struct {
 
 func billingPeriodFor(ts time.Time, resetDay int) billingPeriod {
 	resetDay = normalizeBillingResetDay(resetDay)
-	now := ts.UTC()
-	currentReset := resetDate(now.Year(), now.Month(), resetDay)
+	loc := effectiveTimeLocation(ts)
+	now := ts.In(loc)
+	currentReset := resetDateInLocation(now.Year(), now.Month(), resetDay, loc)
 	start := currentReset
 	if now.Before(currentReset) {
 		previousYear, previousMonth := monthOffset(now.Year(), now.Month(), -1)
-		start = resetDate(previousYear, previousMonth, resetDay)
+		start = resetDateInLocation(previousYear, previousMonth, resetDay, loc)
 	}
 	nextYear, nextMonth := monthOffset(start.Year(), start.Month(), 1)
-	nextReset := resetDate(nextYear, nextMonth, resetDay)
+	nextReset := resetDateInLocation(nextYear, nextMonth, resetDay, loc)
 	return billingPeriod{
 		Key:       start.Format("2006-01"),
 		StartDate: start.Format("2006-01-02"),
@@ -213,12 +217,15 @@ func billingPeriodFor(ts time.Time, resetDay int) billingPeriod {
 	}
 }
 
-func resetDate(year int, month time.Month, resetDay int) time.Time {
+func resetDateInLocation(year int, month time.Month, resetDay int, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.Local
+	}
 	day := resetDay
 	if maxDay := daysInMonth(year, month); day > maxDay {
 		day = maxDay
 	}
-	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+	return time.Date(year, month, day, 0, 0, 0, 0, loc)
 }
 
 func daysInMonth(year int, month time.Month) int {

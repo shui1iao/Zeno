@@ -4,7 +4,7 @@ import type { HomeCardNode, HourlyLatencyPoint } from '../types'
 import { ServerCard } from './ServerCard'
 
 const hourlyHistory: HourlyLatencyPoint[] = [0, 50, 99.99, 100, 150, 199.99, 200, 250, -1, null, 75, 175].map((latencyMs, index) => ({
-  startedAt: new Date(Date.UTC(2026, 6, 29, index)).toISOString(),
+  startedAt: new Date(2026, 6, 29, index).toISOString(),
   latencyMs,
   lossPercent: [0, 0.1, 0.5, 0.9, 1, 2, 4.9, 5, 10, 25, null, 0][index],
 }))
@@ -138,7 +138,7 @@ describe('ServerCard', () => {
       <ServerCard node={{ ...baseNode, renewalAmount: 20, renewalCurrency: 'USD', billingCycle: '年' }} displayCurrency="CNY" exchangeRates={{ CNY: 1, USD: 8 }} onOpen={vi.fn()} />,
     )
 
-    expect(html).toMatch(/class="node-footer-grid"[\s\S]*metric-up[\s\S]*metric-down[\s\S]*metric-expiry is-safe[\s\S]*metric-billing[\s\S]*health-latency[\s\S]*health-loss/)
+    expect(html).toMatch(/class="node-footer-grid"[\s\S]*metric-up[\s\S]*metric-down[\s\S]*metric-expiry"[\s\S]*metric-billing[\s\S]*health-latency[\s\S]*health-loss/)
     expect(html.match(/class="node-metric /g)).toHaveLength(4)
     expect(html.match(/class="node-health-metric /g)).toHaveLength(2)
     expect(html).not.toContain('node-health-history')
@@ -192,17 +192,19 @@ describe('ServerCard', () => {
     expect(html).toMatch(/metric-billing[\s\S]*>账单<\/span>[\s\S]*>--<\/strong>/)
   })
 
-  it('styles precomputed recurring expiry labels by urgency', () => {
+  it('keeps precomputed recurring expiry labels in neutral text without urgency classes', () => {
     const html = renderToStaticMarkup(<ServerCard node={{ ...baseNode, expiryLabel: '余 3 天' }} onOpen={vi.fn()} />)
 
-    expect(html).toContain('metric-expiry is-urgent')
+    expect(html).toContain('node-metric metric-expiry"')
+    expect(html).not.toContain('is-urgent')
     expect(html).toContain('>3 天</strong>')
   })
 
   it('shows a due-today remaining value as zero days', () => {
     const html = renderToStaticMarkup(<ServerCard node={{ ...baseNode, expiryLabel: '今天到期' }} onOpen={vi.fn()} />)
 
-    expect(html).toContain('metric-expiry is-urgent')
+    expect(html).toContain('node-metric metric-expiry"')
+    expect(html).not.toContain('is-urgent')
     expect(html).toContain('>0 天</strong>')
     expect(html).not.toContain('>今天到期</strong>')
   })
@@ -213,5 +215,12 @@ describe('ServerCard', () => {
     )
 
     expect(html).toContain('>€ 16 / 年</strong>')
+  })
+
+  it('maps macOS / darwin nodes to the dedicated Apple icon', () => {
+    const html = renderToStaticMarkup(<ServerCard node={{ ...baseNode, os: 'darwin' }} onOpen={vi.fn()} />)
+
+    expect(html).toContain('data-os="darwin"')
+    expect(html).toContain('src="/assets/logo/os-macos.svg"')
   })
 })

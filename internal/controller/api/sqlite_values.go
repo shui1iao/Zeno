@@ -111,13 +111,37 @@ func billingCycleMonths(value sql.NullString) int {
 	return 0
 }
 
+func effectiveTimeLocation(value time.Time) *time.Location {
+	if loc := value.Location(); loc != nil {
+		return loc
+	}
+	return time.Local
+}
+
+func dateOnlyInLocation(value time.Time, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = effectiveTimeLocation(value)
+	}
+	year, month, day := value.In(loc).Date()
+	return time.Date(year, month, day, 0, 0, 0, 0, loc)
+}
+
+func calendarDaysBetween(from, to time.Time) int {
+	fromYear, fromMonth, fromDay := from.Date()
+	toYear, toMonth, toDay := to.Date()
+	fromMidnight := time.Date(fromYear, fromMonth, fromDay, 0, 0, 0, 0, time.UTC)
+	toMidnight := time.Date(toYear, toMonth, toDay, 0, 0, 0, 0, time.UTC)
+	return int(toMidnight.Sub(fromMidnight) / (24 * time.Hour))
+}
+
 func nextBillingCycleDate(rawDate string, cycleMonths int, now time.Time) (time.Time, bool) {
-	anchorDate, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(rawDate), time.UTC)
+	loc := effectiveTimeLocation(now)
+	anchorDate, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(rawDate), loc)
 	if err != nil || cycleMonths <= 0 {
 		return time.Time{}, false
 	}
-	today := dateOnlyUTC(now)
-	anchorDate = dateOnlyUTC(anchorDate)
+	today := dateOnlyInLocation(now, loc)
+	anchorDate = dateOnlyInLocation(anchorDate, loc)
 
 	yearsApart := today.Year() - anchorDate.Year()
 	monthsApart := yearsApart*12 + int(today.Month()-anchorDate.Month())
@@ -147,9 +171,7 @@ func nextBillingCycleDate(rawDate string, cycleMonths int, now time.Time) (time.
 }
 
 func formatExpiryDaysLabel(date, now time.Time) string {
-	today := dateOnlyUTC(now)
-	due := dateOnlyUTC(date)
-	days := int(due.Sub(today).Hours() / 24)
+	days := calendarDaysBetween(now, date)
 	if days < 0 {
 		return "已过期"
 	}
@@ -160,12 +182,12 @@ func formatExpiryDaysLabel(date, now time.Time) string {
 }
 
 func dateOnlyUTC(value time.Time) time.Time {
-	year, month, day := value.Date()
-	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
+	return dateOnlyInLocation(value, effectiveTimeLocation(value))
 }
 
 func addMonthsFromAnchorClampedUTC(anchor time.Time, months int) time.Time {
-	anchor = dateOnlyUTC(anchor)
+	loc := effectiveTimeLocation(anchor)
+	anchor = dateOnlyInLocation(anchor, loc)
 	year, month, day := anchor.Date()
 	totalMonths := year*12 + int(month) - 1 + months
 	newYear := totalMonths / 12
@@ -177,7 +199,7 @@ func addMonthsFromAnchorClampedUTC(anchor time.Time, months int) time.Time {
 	if maxDay := daysInMonth(newYear, newMonth); day > maxDay {
 		day = maxDay
 	}
-	return time.Date(newYear, newMonth, day, 0, 0, 0, 0, time.UTC)
+	return time.Date(newYear, newMonth, day, 0, 0, 0, 0, loc)
 }
 
 func sqliteBoolInt(value bool) int {

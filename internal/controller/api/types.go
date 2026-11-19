@@ -1,10 +1,29 @@
 package api
 
+import "encoding/json"
+
 type SummaryResponse struct {
 	Nodes         []Node             `json:"nodes"`
 	Services      []ServiceTarget    `json:"services"`
 	LatencyPoints []LatencyPoint     `json:"latency_points"`
 	ExchangeRates map[string]float64 `json:"exchange_rates"`
+}
+
+func (response SummaryResponse) MarshalJSON() ([]byte, error) {
+	type alias SummaryResponse
+	if response.Nodes == nil {
+		response.Nodes = []Node{}
+	}
+	if response.Services == nil {
+		response.Services = []ServiceTarget{}
+	}
+	if response.LatencyPoints == nil {
+		response.LatencyPoints = []LatencyPoint{}
+	}
+	if response.ExchangeRates == nil {
+		response.ExchangeRates = map[string]float64{}
+	}
+	return json.Marshal(alias(response))
 }
 
 type LatencyResponse struct {
@@ -81,6 +100,7 @@ type HourlyLatencyPoint struct {
 
 type LatencyPoint struct {
 	TS          string   `json:"ts"`
+	TSUnix      int64    `json:"-"`
 	TargetID    string   `json:"target_id"`
 	TargetName  string   `json:"target_name"`
 	MedianMS    *float64 `json:"median_ms"`
@@ -102,6 +122,7 @@ type ServiceTarget struct {
 
 type StatePoint struct {
 	TS                 string   `json:"ts"`
+	TSUnix             int64    `json:"-"`
 	CPUPercent         *float64 `json:"cpu_percent"`
 	Load1              *float64 `json:"load1"`
 	Load5              *float64 `json:"load5"`

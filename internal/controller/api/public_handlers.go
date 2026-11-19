@@ -100,9 +100,7 @@ func (h *handler) handleSummary(w http.ResponseWriter, r *http.Request) {
 		if h.performance != nil {
 			h.performance.summaryFreshHits.Add(1)
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(payload)
+		writeRawJSONForRequest(w, r, http.StatusOK, payload)
 		return
 	}
 	// The public summary contains no private state. Serve the last complete
@@ -113,7 +111,7 @@ func (h *handler) handleSummary(w http.ResponseWriter, r *http.Request) {
 		if h.performance != nil {
 			h.performance.summaryStaleHits.Add(1)
 		}
-		writeRawJSON(w, http.StatusOK, payload)
+		writeRawJSONForRequest(w, r, http.StatusOK, payload)
 		h.scheduleSummaryRefreshAfter(summaryCacheBackgroundDelay)
 		return
 	}
@@ -125,9 +123,7 @@ func (h *handler) handleSummary(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(payload)
+	writeRawJSONForRequest(w, r, http.StatusOK, payload)
 }
 
 func (h *handler) handlePublicNodeResource(w http.ResponseWriter, r *http.Request) {
@@ -182,5 +178,5 @@ func (h *handler) handlePublicNodeResource(w http.ResponseWriter, r *http.Reques
 		writeStoreError(w, err)
 		return
 	}
-	writeRawJSON(w, http.StatusOK, payload)
+	writeRawJSONForRequest(w, r, http.StatusOK, payload)
 }

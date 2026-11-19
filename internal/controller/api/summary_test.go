@@ -706,3 +706,118 @@ func (s *sqliteReadQueries) legacyPopulateServiceTargetLatencySummary(ctx contex
 	}
 	return nil
 }
+
+func BenchmarkSQLiteSummaryAggregatesAtScale(b *testing.B) {
+	ctx := context.Background()
+	store, err := OpenSQLiteStore(filepath.Join(b.TempDir(), "zeno.db"))
+	if err != nil {
+		b.Fatalf("open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	now := time.Now().UTC().Truncate(time.Second)
+	const (
+		nodeCount   = 6
+		targetCount = 16
+		roundsPerPair = 1000 // 96,000 probe_rounds across 24h
+	)
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		b.Fatalf("begin seed tx: %v", err)
+	}
+	for targetIndex := 0; targetIndex < targetCount; targetIndex++ {
+		targetID := fmt.Sprintf("target-%02d", targetIndex)
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO probe_targets (id, name, type, address, count, timeout_ms, interval_sec, display_order, created_at, updated_at)
+			VALUES (?, ?, 'tcp', '192.0.2.1', 3, 1000, 30, ?, ?, ?)
+		`, targetID, fmt.Sprintf("Target %02d", targetIndex), targetIndex, now.Unix(), now.Unix()); err != nil {
+			b.Fatalf("insert target: %v", err)
+		}
+	}
+	for nodeIndex := 0; nodeIndex < nodeCount; nodeIndex++ {
+		nodeID := fmt.Sprintf("node-%02d", nodeIndex)
+		homeTargetID := fmt.Sprintf("target-%02d", nodeIndex%targetCount)
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO nodes (id, display_name, token_hash, status, country_code, home_probe_target_id, display_order, disabled, created_at, updated_at, last_seen_at)
+			VALUES (?, ?, 'hash', 'online', 'HK', ?, ?, 0, ?, ?, ?)
+		`, nodeID, fmt.Sprintf("Node %02d", nodeIndex), homeTargetID, nodeIndex, now.Unix(), now.Unix(), now.Unix()); err != nil {
+			b.Fatalf("insert node: %v", err)
+		}
+		for targetIndex := 0; targetIndex < targetCount; targetIndex++ {
+			targetID := fmt.Sprintf("target-%02d", targetIndex)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO node_probe_targets (node_id, target_id, enabled) VALUES (?, ?, 1)`, nodeID, targetID); err != nil {
+				b.Fatalf("insert assignment: %v", err)
+			}
+		}
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO probe_rounds (node_id, target_id, ts, type, sent, received, loss_percent, avg_ms, median_ms)
+		VALUES (?, ?, ?, 'tcp', 3, 3, ?, ?, ?)
+	`)
+	if err != nil {
+		b.Fatalf("prepare round insert: %v", err)
+	}
+	stepSec := int64((24 * time.Hour) / time.Second / roundsPerPair)
+	startTS := now.Add(-23 * time.Hour).Unix()
+	for roundIndex := 0; roundIndex < roundsPerPair; roundIndex++ {
+		ts := startTS + int64(roundIndex)*stepSec
+		for nodeIndex := 0; nodeIndex < nodeCount; nodeIndex++ {
+			nodeID := fmt.Sprintf("node-%02d", nodeIndex)
+			for targetIndex := 0; targetIndex < targetCount; targetIndex++ {
+				targetID := fmt.Sprintf("target-%02d", targetIndex)
+				lat := float64(10 + (roundIndex+nodeIndex+targetIndex)%50)
+				loss := float64((roundIndex + targetIndex) % 5)
+				if _, err := stmt.ExecContext(ctx, nodeID, targetID, ts, loss, lat+0.5, lat); err != nil {
+					b.Fatalf("insert round: %v", err)
+				}
+			}
+		}
+	}
+	_ = stmt.Close()
+	if err := tx.Commit(); err != nil {
+		b.Fatalf("commit seed tx: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for iteration := 0; iteration < b.N; iteration++ {
+		store.invalidateSummaryAggregates()
+		if _, _, _, err := store.summaryAggregates(ctx); err != nil {
+			b.Fatalf("summaryAggregates: %v", err)
+		}
+	}
+}
+
+func TestSummaryBatchQueriesEdgeCasesMatchLegacySemantics(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenSQLiteStore(filepath.Join(t.TempDir(), "zeno.db"))
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	seedSummarySemanticsFixture(t, store)
+	now := time.Now().UTC().Truncate(time.Second)
+	// Target with only >24h stale rounds on an enabled node: ReportingNodeCount must be 0,
+	// while latest round metrics and UpdatedAt are still populated identically to legacy.
+	seedSummaryTarget(t, store, "target-stale-only", "Stale Only", "tcp", "203.0.113.20", 50, now)
+	seedSummaryAssignment(t, store, "node-a", "target-stale-only", true)
+	seedSummaryRound(t, store, "node-a", "target-stale-only", now.Add(-26*time.Hour), 12.5, float64Ptr(42), float64Ptr(41))
+	// Newer round from disabled node must still be ignored in favor of active node's round.
+	seedSummaryAssignment(t, store, "node-disabled", "target-stale-only", true)
+	seedSummaryRound(t, store, "node-disabled", "target-stale-only", now.Add(-5*time.Minute), 0, float64Ptr(5), float64Ptr(5))
+
+	got, err := store.Summary(ctx)
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	want, err := legacySummaryForTest(ctx, store)
+	if err != nil {
+		t.Fatalf("legacy summary: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("edge-case summary mismatch\ngot:  %#v\nwant: %#v", got, want)
+	}
+}
+
+

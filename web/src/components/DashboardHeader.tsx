@@ -52,7 +52,6 @@ function BrandLogo({ logoUrl, siteTitle }: { logoUrl?: string; siteTitle?: strin
       src={currentSource}
       width="32"
       height="32"
-      decoding="async"
       alt={`${siteTitle || 'Zeno'} logo`}
       onError={() => {
         if (currentSource !== defaultSettings.logoUrl) setCurrentSource(defaultSettings.logoUrl)

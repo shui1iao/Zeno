@@ -20,6 +20,11 @@ type HandlerOptions struct {
 	NotificationClient       *http.Client
 	TelegramAPIBaseURL       string
 	StaleOfflineScanInterval time.Duration
+	// StartupOfflineGrace suppresses fresh node_offline transitions right after
+	// Controller startup so restarts and reverse-proxy recoveries do not cause
+	// false offline notification storms. Zero defaults to DefaultStartupOfflineGrace
+	// when StaleOfflineScanInterval is enabled; negative values disable it.
+	StartupOfflineGrace      time.Duration
 	HistoryRetentionInterval time.Duration
 	// NotificationReconcileInterval enables the notification reconcile loop.
 	NotificationReconcileInterval time.Duration
@@ -72,6 +77,8 @@ type handler struct {
 	notificationClock       func() time.Time
 	notificationLoc         *time.Location
 	notificationSendTimeout time.Duration
+	startedAt               time.Time
+	startupOfflineGrace     time.Duration
 	performance             *runtimePerformance
 	router                  http.Handler
 }
@@ -142,6 +149,15 @@ func NewHandler(options ...HandlerOptions) http.Handler {
 		backgroundCtx:               backgroundCtx,
 		backgroundCancel:            backgroundCancel,
 	}
+	startupGrace := opts.StartupOfflineGrace
+	if startupGrace == 0 && opts.StaleOfflineScanInterval > 0 {
+		startupGrace = DefaultStartupOfflineGrace
+	}
+	if startupGrace < 0 {
+		startupGrace = 0
+	}
+	h.startedAt = h.notificationNow()
+	h.startupOfflineGrace = startupGrace
 	if opts.DisableNotifications {
 		h.notificationSender = nil
 	}

@@ -159,6 +159,13 @@ func TestOpenSQLiteStoreMigratesLegacyNotificationDeliveryLeaseColumnsBeforeInde
 		t.Fatalf("create legacy notification deliveries table: %v", err)
 	}
 	if _, err := db.Exec(`
+		CREATE INDEX idx_notification_deliveries_pending ON notification_deliveries(state, next_attempt_at, id);
+		CREATE INDEX idx_notification_deliveries_claim ON notification_deliveries(state, next_attempt_at, id);
+	`); err != nil {
+		_ = db.Close()
+		t.Fatalf("create legacy notification delivery indexes: %v", err)
+	}
+	if _, err := db.Exec(`
 		INSERT INTO notification_deliveries (
 			event_type, channel_id, state, next_attempt_at, created_at, updated_at
 		) VALUES ('node_offline', 'legacy-channel', 'leased', 1, 100, 200)
@@ -190,12 +197,23 @@ func TestOpenSQLiteStoreMigratesLegacyNotificationDeliveryLeaseColumnsBeforeInde
 	if err := store.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM sqlite_master
-		WHERE type = 'index' AND name = 'idx_notification_deliveries_claim'
+		WHERE type = 'index' AND tbl_name = 'notification_deliveries' AND name NOT LIKE 'sqlite_autoindex_%'
 	`).Scan(&indexCount); err != nil {
-		t.Fatalf("inspect notification delivery claim index: %v", err)
+		t.Fatalf("inspect notification delivery secondary indexes: %v", err)
 	}
-	if indexCount != 1 {
-		t.Fatalf("expected claim index after migration, got %d", indexCount)
+	if indexCount != 0 {
+		t.Fatalf("expected retired notification_deliveries secondary indexes to be dropped, got %d", indexCount)
+	}
+	var probeNodeTSCount int
+	if err := store.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM sqlite_master
+		WHERE type = 'index' AND name = 'idx_probe_rounds_node_ts'
+	`).Scan(&probeNodeTSCount); err != nil {
+		t.Fatalf("inspect idx_probe_rounds_node_ts: %v", err)
+	}
+	if probeNodeTSCount != 1 {
+		t.Fatalf("expected idx_probe_rounds_node_ts(node_id, ts) to be retained, got %d", probeNodeTSCount)
 	}
 	var state string
 	var requestStartedAt int64
@@ -1334,3 +1352,54 @@ func TestRunLocalProbeUsesTargetTypeImplementations(t *testing.T) {
 		t.Fatalf("parsed ping latency = %v, want 1.23", parsed)
 	}
 }
+
+func TestOpenSQLiteStoreConfiguresPageCacheAndMMapPragmas(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "zeno.db")
+	store, err := OpenSQLiteStore(path)
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	writeDSN, _, err := sqliteWriteDSN(path)
+	if err != nil {
+		t.Fatalf("write DSN: %v", err)
+	}
+	if !strings.Contains(writeDSN, "cache_size") || !strings.Contains(writeDSN, "mmap_size") {
+		t.Fatalf("write DSN missing cache_size or mmap_size: %s", writeDSN)
+	}
+	readDSN, err := sqliteReadDSN(path)
+	if err != nil {
+		t.Fatalf("read DSN: %v", err)
+	}
+	if !strings.Contains(readDSN, "cache_size") || !strings.Contains(readDSN, "mmap_size") {
+		t.Fatalf("read DSN missing cache_size or mmap_size: %s", readDSN)
+	}
+
+	var writeCacheSize, readCacheSize, writeMMapSize, readMMapSize int64
+	if err := store.db.QueryRow(`PRAGMA cache_size`).Scan(&writeCacheSize); err != nil {
+		t.Fatalf("query write cache_size: %v", err)
+	}
+	if writeCacheSize != sqliteWriterCacheSizeKiB {
+		t.Fatalf("write cache_size = %d, want %d", writeCacheSize, sqliteWriterCacheSizeKiB)
+	}
+	if err := store.readDB.QueryRow(`PRAGMA cache_size`).Scan(&readCacheSize); err != nil {
+		t.Fatalf("query read cache_size: %v", err)
+	}
+	if readCacheSize != sqliteReaderCacheSizeKiB {
+		t.Fatalf("read cache_size = %d, want %d", readCacheSize, sqliteReaderCacheSizeKiB)
+	}
+	if err := store.db.QueryRow(`PRAGMA mmap_size`).Scan(&writeMMapSize); err != nil {
+		t.Fatalf("query write mmap_size: %v", err)
+	}
+	if err := store.readDB.QueryRow(`PRAGMA mmap_size`).Scan(&readMMapSize); err != nil {
+		t.Fatalf("query read mmap_size: %v", err)
+	}
+	if writeMMapSize != 0 && writeMMapSize != sqliteMMapSizeBytes {
+		t.Fatalf("unexpected write mmap_size = %d", writeMMapSize)
+	}
+	if readMMapSize != 0 && readMMapSize != sqliteMMapSizeBytes {
+		t.Fatalf("unexpected read mmap_size = %d", readMMapSize)
+	}
+}
+

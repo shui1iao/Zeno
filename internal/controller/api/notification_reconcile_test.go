@@ -512,9 +512,9 @@ func TestReconcileRenewalReminders(t *testing.T) {
 		setNodeExpiry(t, hs, "sharon", "2026-10-10", "")
 		enableRenewalForHarness(t, hs)
 		hs.round()
-		hs.at(shanghaiTime(2026, 10, 7, 7, 59, 0))
+		hs.at(shanghaiTime(2026, 10, 6, 23, 59, 0))
 		hs.expectAcked()
-		hs.at(shanghaiTime(2026, 10, 7, 8, 0, 30))
+		hs.at(shanghaiTime(2026, 10, 7, 0, 0, 30))
 		want := "⚠️[到期] Sharon 将于 3 天后（2026-10-10）到期"
 		hs.expectAcked(want)
 		for _, at := range []time.Time{shanghaiTime(2026, 10, 7, 20, 0, 0), shanghaiTime(2026, 10, 9, 9, 0, 0), shanghaiTime(2026, 10, 12, 9, 0, 0)} {

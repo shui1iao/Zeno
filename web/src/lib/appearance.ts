@@ -218,9 +218,10 @@ function subscribeSystemTheme(onChange: () => void) {
   return () => media?.removeEventListener?.('change', onChange)
 }
 
-export function useDocumentTheme(settings: AdminSettings) {
+export function useDocumentTheme(settings: AdminSettings): Exclude<AdminTheme, 'system'> {
   // Re-render the owner as well as updating root variables: the shell paints inline tokens.
-  const observedSystemTheme = useSyncExternalStore(subscribeSystemTheme, systemTheme, () => 'light')
+  const observedSystemTheme = useSyncExternalStore(subscribeSystemTheme, systemTheme, () => 'light' as const)
+  const activeTheme: Exclude<AdminTheme, 'system'> = settings.theme === 'system' ? observedSystemTheme : settings.theme
   useLayoutEffect(() => {
     if (typeof document === 'undefined') return undefined
     const root = document.documentElement
@@ -267,6 +268,7 @@ export function useDocumentTheme(settings: AdminSettings) {
     settings.backgroundOverlay,
     settings.themeColor,
   ])
+  return activeTheme
 }
 
 /** Browser tab title: "<page> · <site title>", or just the site title on the home page. */

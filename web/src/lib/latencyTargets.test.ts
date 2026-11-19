@@ -55,4 +55,12 @@ describe('summarizeLatencyTargets', () => {
 
     expect(targets[0]).toMatchObject({ sampleCount: 1, avgMs: 190, lossPercent: 10 })
   })
+
+  it('keeps packet loss null when every bucket for a target is empty', () => {
+    const targets = summarizeLatencyTargets([
+      { ts: '2026-07-02T12:00:00Z', targetId: 'dc2', targetName: 'DC2', medianMs: null, avgMs: null, lossPercent: 0 },
+    ])
+
+    expect(targets[0]).toMatchObject({ sampleCount: 0, avgMs: null, lossPercent: null })
+  })
 })

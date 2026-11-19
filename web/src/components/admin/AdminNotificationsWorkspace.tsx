@@ -220,7 +220,7 @@ export function AdminNotificationsWorkspace({ channels, rules, nodes, onChannelC
         <section className="admin-workspace-card" aria-label="通知设置">
           <section className="admin-notification-group" aria-label="通知渠道">
             {channels.length === 0 && <div className="admin-state-card">还没有通知渠道。</div>}
-            {channels.length > 0 && <AdminNotificationChannelList channels={channels} onDelete={onChannelDelete} onEdit={setEditingChannel} />}
+            {channels.length > 0 && <AdminNotificationChannelList channels={channels} onDelete={onChannelDelete} onEdit={setEditingChannel} onUpdate={onChannelUpdate} onTest={onChannelTest} />}
           </section>
           <AdminAlertRulesSection rules={rules} nodes={nodes} onUpdate={onRuleUpdate} />
         </section>
@@ -246,8 +246,18 @@ export function AdminNotificationsWorkspace({ channels, rules, nodes, onChannelC
   )
 }
 
-function AdminNotificationChannelList({ channels, onDelete, onEdit }: { channels: AdminNotificationChannel[]; onDelete: (channelId: string) => MaybePromise; onEdit: (channel: AdminNotificationChannel) => void }) {
+function AdminNotificationChannelList({ channels, onDelete, onEdit, onUpdate, onTest }: { channels: AdminNotificationChannel[]; onDelete: (channelId: string) => MaybePromise; onEdit: (channel: AdminNotificationChannel) => void; onUpdate?: (channelId: string, input: AdminNotificationChannelUpdateInput) => MaybePromise; onTest?: (channelId: string) => void }) {
   const [pendingDelete, setPendingDelete] = useState<AdminNotificationChannel | null>(null)
+  const [togglingId, setTogglingId] = useState<string | null>(null)
+  const [toggleError, setToggleError] = useState<string | null>(null)
+  const toggleChannel = (channel: AdminNotificationChannel) => {
+    if (!onUpdate || togglingId !== null) return
+    setTogglingId(channel.id)
+    setToggleError(null)
+    runMaybePromise(() => onUpdate(channel.id, { enabled: !channel.enabled }))
+      .catch((error: unknown) => setToggleError(error instanceof Error ? error.message : '更新失败'))
+      .finally(() => setTogglingId(null))
+  }
 
   return (
     <>
@@ -261,17 +271,37 @@ function AdminNotificationChannelList({ channels, onDelete, onEdit }: { channels
           <div className="admin-list-row" role="listitem" key={channel.id}>
             <div className="admin-list-main">
               <strong>{channel.name}</strong>
+              <small>{channel.credentialSet ? 'Bot Token 已保存' : '未保存 Bot Token'}{channel.destination ? ' · Chat ID 已配置' : ''}</small>
             </div>
-            <AdminStatusBadge label={channel.enabled ? '启用中' : '已停用'} status={channel.enabled ? 'online' : 'disabled'} dataLabel="状态" />
-            <AdminRowActions
-              entityLabel="通知渠道"
-              actionEntityLabel="渠道"
-              name={channel.name}
-              onEdit={() => onEdit(channel)}
-              onDelete={() => setPendingDelete(channel)}
-            />
+            {onUpdate ? (
+              <span data-label="状态" className={`admin-inline-switch${channel.enabled ? ' is-on' : ''}`}>
+                <button
+                  type="button"
+                  role="switch"
+                  className="admin-switch"
+                  aria-checked={channel.enabled}
+                  aria-label={`${channel.enabled ? '停用' : '启用'}通知渠道 ${channel.name}`}
+                  disabled={togglingId !== null}
+                  onClick={() => toggleChannel(channel)}
+                />
+                <span>{togglingId === channel.id ? '保存中…' : channel.enabled ? '启用中' : '已停用'}</span>
+              </span>
+            ) : (
+              <AdminStatusBadge label={channel.enabled ? '启用中' : '已停用'} status={channel.enabled ? 'online' : 'disabled'} dataLabel="状态" />
+            )}
+            <div className="admin-node-row-actions">
+              {onTest && <button className="admin-row-action admin-row-text-action" type="button" onClick={() => onTest(channel.id)}>测试发送</button>}
+              <AdminRowActions
+                entityLabel="通知渠道"
+                actionEntityLabel="渠道"
+                name={channel.name}
+                onEdit={() => onEdit(channel)}
+                onDelete={() => setPendingDelete(channel)}
+              />
+            </div>
           </div>
         ))}
+        {toggleError && <div className="admin-inline-note is-error" role="alert">{toggleError}</div>}
       </div>
       <AdminModalPresence>{pendingDelete && (
         <AdminDeleteConfirmModal

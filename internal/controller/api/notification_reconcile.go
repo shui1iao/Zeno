@@ -41,10 +41,11 @@ func newNotificationReconciler() *notificationReconciler {
 }
 
 func (h *handler) notificationNow() time.Time {
+	loc := h.notificationLocation()
 	if h.notificationClock != nil {
-		return h.notificationClock().UTC()
+		return h.notificationClock().In(loc)
 	}
-	return time.Now().UTC()
+	return time.Now().In(loc)
 }
 
 func (h *handler) notificationLocation() *time.Location {
@@ -179,9 +180,10 @@ func (h *handler) planNotificationItem(plan *notificationRoundPlan, snapshot not
 		Kind: kind, ChannelID: channel.ID, NodeID: node.ID, Now: now.Unix(),
 		HasRow: hasRow, Row: row,
 		ChannelVersion: channel.DeliveryVersion, ChannelFingerprint: channel.DestinationFingerprint,
-		Paused:      node.Disabled || len(rules) == 0,
-		LastSeenAt:  node.LastSeenAt,
-		HoldSeconds: notificationHoldSeconds(rules),
+		Paused:       node.Disabled || len(rules) == 0,
+		StartupGrace: h.inStartupOfflineGrace(now),
+		LastSeenAt:   node.LastSeenAt,
+		HoldSeconds:  notificationHoldSeconds(rules),
 	}
 	switch kind {
 	case notificationKindLiveness:
@@ -279,7 +281,7 @@ func (h *handler) notificationMessageText(item notificationSendItem, now time.Ti
 		}
 		return resourceRecoveryText(label, item.row.NotifiedDetail, item.row.IncidentFrom, item.row.PendingSince, now, loc)
 	default:
-		return renewalMessageText(label, item.row.PendingTarget, now)
+		return renewalMessageText(label, item.row.PendingTarget, now.In(loc))
 	}
 }
 

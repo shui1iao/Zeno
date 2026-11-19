@@ -65,31 +65,102 @@ func (response *StateResponse) UnmarshalJSON(data []byte) error {
 }
 
 func stateSeriesPayloadFromPoints(points []StatePoint) ([]int64, *StateSeries) {
-	if len(points) == 0 {
+	n := len(points)
+	if n == 0 {
 		return nil, nil
 	}
-	createdAt := make([]int64, 0, len(points))
-	series := &StateSeries{}
-	for _, point := range points {
-		createdAt = append(createdAt, latencyTimestampMillis(point.TS))
-		series.CPUPercent = append(series.CPUPercent, compactLatencyValue(point.CPUPercent))
-		series.Load1 = append(series.Load1, compactLatencyValue(point.Load1))
-		series.Load5 = append(series.Load5, compactLatencyValue(point.Load5))
-		series.Load15 = append(series.Load15, compactLatencyValue(point.Load15))
-		series.MemoryUsedBytes = append(series.MemoryUsedBytes, compactLatencyValue(point.MemoryUsedBytes))
-		series.MemoryTotalBytes = append(series.MemoryTotalBytes, compactLatencyValue(point.MemoryTotalBytes))
-		series.SwapUsedBytes = append(series.SwapUsedBytes, compactLatencyValue(point.SwapUsedBytes))
-		series.SwapTotalBytes = append(series.SwapTotalBytes, compactLatencyValue(point.SwapTotalBytes))
-		series.DiskUsedBytes = append(series.DiskUsedBytes, compactLatencyValue(point.DiskUsedBytes))
-		series.DiskTotalBytes = append(series.DiskTotalBytes, compactLatencyValue(point.DiskTotalBytes))
-		series.NetInTotalBytes = append(series.NetInTotalBytes, compactLatencyValue(point.NetInTotalBytes))
-		series.NetOutTotalBytes = append(series.NetOutTotalBytes, compactLatencyValue(point.NetOutTotalBytes))
-		series.NetInSpeedBps = append(series.NetInSpeedBps, compactLatencyValue(point.NetInSpeedBps))
-		series.NetOutSpeedBps = append(series.NetOutSpeedBps, compactLatencyValue(point.NetOutSpeedBps))
-		series.ProcessCount = append(series.ProcessCount, compactLatencyValue(point.ProcessCount))
-		series.TCPConnectionCount = append(series.TCPConnectionCount, compactLatencyValue(point.TCPConnectionCount))
-		series.UDPConnectionCount = append(series.UDPConnectionCount, compactLatencyValue(point.UDPConnectionCount))
-		series.UptimeSeconds = append(series.UptimeSeconds, compactLatencyValue(point.UptimeSeconds))
+	createdAt := make([]int64, n)
+	ptrSlab := make([]*float64, 18*n)
+	series := &StateSeries{
+		CPUPercent:         ptrSlab[0*n : 1*n : 1*n],
+		Load1:              ptrSlab[1*n : 2*n : 2*n],
+		Load5:              ptrSlab[2*n : 3*n : 3*n],
+		Load15:             ptrSlab[3*n : 4*n : 4*n],
+		MemoryUsedBytes:    ptrSlab[4*n : 5*n : 5*n],
+		MemoryTotalBytes:   ptrSlab[5*n : 6*n : 6*n],
+		SwapUsedBytes:      ptrSlab[6*n : 7*n : 7*n],
+		SwapTotalBytes:     ptrSlab[7*n : 8*n : 8*n],
+		DiskUsedBytes:      ptrSlab[8*n : 9*n : 9*n],
+		DiskTotalBytes:     ptrSlab[9*n : 10*n : 10*n],
+		NetInTotalBytes:    ptrSlab[10*n : 11*n : 11*n],
+		NetOutTotalBytes:   ptrSlab[11*n : 12*n : 12*n],
+		NetInSpeedBps:      ptrSlab[12*n : 13*n : 13*n],
+		NetOutSpeedBps:     ptrSlab[13*n : 14*n : 14*n],
+		ProcessCount:       ptrSlab[14*n : 15*n : 15*n],
+		TCPConnectionCount: ptrSlab[15*n : 16*n : 16*n],
+		UDPConnectionCount: ptrSlab[16*n : 17*n : 17*n],
+		UptimeSeconds:      ptrSlab[17*n : 18*n : 18*n],
+	}
+	floatValues := floatSlab{buf: make([]float64, 0, 18*n)}
+	var lastTS string
+	var lastMillis int64
+	var hasLastTS bool
+	for i := range points {
+		point := &points[i]
+		if point.TSUnix > 0 {
+			createdAt[i] = point.TSUnix * 1000
+		} else if hasLastTS && point.TS == lastTS {
+			createdAt[i] = lastMillis
+		} else {
+			lastMillis = latencyTimestampMillis(point.TS)
+			lastTS = point.TS
+			hasLastTS = true
+			createdAt[i] = lastMillis
+		}
+		if point.CPUPercent != nil {
+			series.CPUPercent[i] = floatValues.alloc(compactLatencyNumber(*point.CPUPercent))
+		}
+		if point.Load1 != nil {
+			series.Load1[i] = floatValues.alloc(compactLatencyNumber(*point.Load1))
+		}
+		if point.Load5 != nil {
+			series.Load5[i] = floatValues.alloc(compactLatencyNumber(*point.Load5))
+		}
+		if point.Load15 != nil {
+			series.Load15[i] = floatValues.alloc(compactLatencyNumber(*point.Load15))
+		}
+		if point.MemoryUsedBytes != nil {
+			series.MemoryUsedBytes[i] = floatValues.alloc(compactLatencyNumber(*point.MemoryUsedBytes))
+		}
+		if point.MemoryTotalBytes != nil {
+			series.MemoryTotalBytes[i] = floatValues.alloc(compactLatencyNumber(*point.MemoryTotalBytes))
+		}
+		if point.SwapUsedBytes != nil {
+			series.SwapUsedBytes[i] = floatValues.alloc(compactLatencyNumber(*point.SwapUsedBytes))
+		}
+		if point.SwapTotalBytes != nil {
+			series.SwapTotalBytes[i] = floatValues.alloc(compactLatencyNumber(*point.SwapTotalBytes))
+		}
+		if point.DiskUsedBytes != nil {
+			series.DiskUsedBytes[i] = floatValues.alloc(compactLatencyNumber(*point.DiskUsedBytes))
+		}
+		if point.DiskTotalBytes != nil {
+			series.DiskTotalBytes[i] = floatValues.alloc(compactLatencyNumber(*point.DiskTotalBytes))
+		}
+		if point.NetInTotalBytes != nil {
+			series.NetInTotalBytes[i] = floatValues.alloc(compactLatencyNumber(*point.NetInTotalBytes))
+		}
+		if point.NetOutTotalBytes != nil {
+			series.NetOutTotalBytes[i] = floatValues.alloc(compactLatencyNumber(*point.NetOutTotalBytes))
+		}
+		if point.NetInSpeedBps != nil {
+			series.NetInSpeedBps[i] = floatValues.alloc(compactLatencyNumber(*point.NetInSpeedBps))
+		}
+		if point.NetOutSpeedBps != nil {
+			series.NetOutSpeedBps[i] = floatValues.alloc(compactLatencyNumber(*point.NetOutSpeedBps))
+		}
+		if point.ProcessCount != nil {
+			series.ProcessCount[i] = floatValues.alloc(compactLatencyNumber(*point.ProcessCount))
+		}
+		if point.TCPConnectionCount != nil {
+			series.TCPConnectionCount[i] = floatValues.alloc(compactLatencyNumber(*point.TCPConnectionCount))
+		}
+		if point.UDPConnectionCount != nil {
+			series.UDPConnectionCount[i] = floatValues.alloc(compactLatencyNumber(*point.UDPConnectionCount))
+		}
+		if point.UptimeSeconds != nil {
+			series.UptimeSeconds[i] = floatValues.alloc(compactLatencyNumber(*point.UptimeSeconds))
+		}
 	}
 	return createdAt, series
 }

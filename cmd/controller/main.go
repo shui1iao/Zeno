@@ -108,6 +108,7 @@ func buildController(config handlerConfig) (*controllerRuntime, error) {
 		options.Store = store
 		options.DisableNotifications = config.DisableNotifications
 		options.StaleOfflineScanInterval = 5 * time.Second
+		options.StartupOfflineGrace = api.DefaultStartupOfflineGrace
 		options.HistoryRetentionInterval = time.Hour
 		options.NotificationReconcileInterval = 2 * time.Second
 		options.ExchangeRateRefreshInterval = 24 * time.Hour

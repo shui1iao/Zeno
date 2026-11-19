@@ -49,44 +49,39 @@ const points: StatePoint[] = [
 ]
 
 describe('StateHistoryPanel', () => {
-  it('shows six metric tiles and, like the latency chart, draws every metric by default', () => {
+  it('splits resources into six small multiples, each on its own unit, all drawn by default', () => {
     const html = renderToStaticMarkup(<StateHistoryPanel points={points} range="1d" canUseExtendedRanges />)
 
-    expect(html).toContain('系统资源趋势')
+    expect(html).toContain('<h3>系统资源</h3>')
     expect(html).toContain('resource history range selector')
     expect(html).toContain('7 天')
     expect(html).not.toContain('温度')
 
-    // Tiles reuse the latency target grid; nothing is selected by default.
-    expect(html).toContain('latency-target-grid resource-metric-grid')
+    // Six independent small charts, one per metric, never a single mixed 0-100% canvas.
+    expect(html).toContain('class="resource-multiples"')
     expect(html.match(/data-metric="/g)).toHaveLength(6)
-    const tiles = html.slice(html.indexOf('resource-metric-grid'), html.indexOf('resource-chart-panel'))
-    expect(tiles).not.toContain('aria-pressed="true"')
+    expect(html.match(/class="latency-chart resource-mini-chart"/g)).toHaveLength(6)
+    expect(html).not.toContain('class="latency-chart resource-chart"')
     expect(html).toContain('18.8%')
-    const cpuTile = tiles.slice(tiles.indexOf('data-metric="cpu"'), tiles.indexOf('data-metric="memory"'))
-    expect(cpuTile).toContain('<em>0.42 / 0.35 / 0.28</em>')
+    const tile = (from: string, to?: string) => html.slice(html.indexOf(`data-metric="${from}"`), to ? html.indexOf(`data-metric="${to}"`) : undefined)
+    const cpuTile = tile('cpu', 'memory')
+    expect(cpuTile).toContain('<span class="resource-multiple__text">0.42 / 0.35 / 0.28</span>')
+    expect(cpuTile).toContain('>100%<')
     expect(cpuTile).not.toContain('负载')
     expect(html).toContain('2.0 KB / 4.0 KB')
     expect(html).toContain('4.0 KB / 8.0 KB')
-    const networkTile = tiles.slice(tiles.indexOf('data-metric="network"'), tiles.indexOf('data-metric="processes"'))
-    expect(networkTile).toContain('<strong>↓ 64.0 KB/s</strong>')
-    expect(networkTile).toContain('<em>↑ 512.0 KB/s</em>')
-    expect(html).toContain('>88<')
-    expect(html).toContain('34 / 12')
-    // Two-line tiles carry no empty third line, so their value can centre.
-    const processTile = tiles.slice(tiles.indexOf('data-metric="processes"'), tiles.indexOf('data-metric="connections"'))
-    expect(processTile).not.toContain('<em')
-
-    // One big chart in the latency chart's canvas with all nine lines on a 0-100 axis.
-    expect(html.match(/class="latency-chart resource-chart"/g)).toHaveLength(1)
-    expect(html).toContain('viewBox="0 0 960 360"')
+    const networkTile = tile('network', 'processes')
+    expect(networkTile).toContain('<strong class="resource-multiple__value">↓ 64.0 KB/s</strong>')
+    expect(networkTile).toContain('↑ 512.0 KB/s')
+    // Rates keep a real-unit axis instead of being squeezed onto a percent axis.
+    expect(networkTile).toMatch(/>\d+ KB\/s</)
+    expect(networkTile).not.toContain('>100%<')
+    expect(tile('processes', 'connections')).toContain('>88<')
+    expect(tile('connections')).toContain('34 / 12')
     for (const key of ['cpu', 'memory', 'swap', 'disk', 'net-out', 'net-in', 'processes', 'tcp', 'udp']) {
       expect(html).toContain(`data-series="${key}"`)
     }
-    expect(html).toContain('>100%<')
-    expect(html).toContain('>75%<')
     expect(html).toMatch(/class="axis-label"[^>]*>\d{2}:\d{2}</)
-    expect(html).not.toContain('-area"')
   })
 
   it('keeps real units for a single-unit selection and rescales rates and counts in a mixed one', () => {
@@ -110,10 +105,8 @@ describe('StateHistoryPanel', () => {
   it('puts the latest Swap usage on the memory tile and leaves it out without swap', () => {
     const html = renderToStaticMarkup(<StateHistoryPanel points={points} range="1d" />)
     const memoryTile = html.slice(html.indexOf('data-metric="memory"'), html.indexOf('data-metric="disk"'))
-    expect(memoryTile).toContain('resource-metric-extra')
-    expect(memoryTile).toContain('<em class="resource-metric-extra"><span>Swap 0.50</span> / <span>2.0 KB</span></em>')
-    const extra = memoryTile.match(/<em class="resource-metric-extra">(.*?)<\/em>/)?.[1]
-    expect(extra?.replace(/<[^>]+>/g, '')).toBe('Swap 0.50 / 2.0 KB')
+    expect(memoryTile).toContain('<span class="resource-multiple__text">2.0 KB / 4.0 KB · Swap 0.50 / 2.0 KB</span>')
+    expect(memoryTile).toContain('data-series="swap"')
     expect(memoryTile).toMatch(/title="[^"]*Swap 25(\.0)?% · 0\.50 \/ 2\.0 KB"/)
 
     const noSwap = points.map((point) => ({ ...point, swapUsedBytes: 0, swapTotalBytes: 0 }))
@@ -129,10 +122,9 @@ describe('StateHistoryPanel', () => {
     const withSwap = points.map((point) => ({ ...point, swapUsedBytes: used, swapTotalBytes: 2147479552 }))
     const html = renderToStaticMarkup(<StateHistoryPanel points={withSwap} range="1d" />)
     const memoryTile = html.slice(html.indexOf('data-metric="memory"'), html.indexOf('data-metric="disk"'))
-    const extra = memoryTile.match(/<em class="resource-metric-extra">(.*?)<\/em>/)?.[1]
-    expect(extra).toBe(`<span>Swap ${amount}</span> / <span>2.0 GB</span>`)
-    expect(extra?.replace(/<[^>]+>/g, '')).toBe(`Swap ${amount} / 2.0 GB`)
-    expect(memoryTile).toContain('<strong>50.0%</strong><em>2.0 KB / 4.0 KB</em>')
+    const text = memoryTile.match(/<span class="resource-multiple__text">(.*?)<\/span>/)?.[1]
+    expect(text).toBe(`2.0 KB / 4.0 KB · Swap ${amount} / 2.0 GB`)
+    expect(memoryTile).toContain('<strong class="resource-multiple__value">50.0%</strong>')
   })
 
   it('opens with the 原始 / 平滑 switch on 平滑', () => {

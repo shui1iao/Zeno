@@ -73,7 +73,15 @@ var defaultAdminAlertRules = []AdminAlertRule{
 }
 
 type sqliteAdminAlertRules struct {
-	db *sql.DB
+	db     *sql.DB
+	readDB *sql.DB
+}
+
+func (s *sqliteAdminAlertRules) queryReadDB() *sql.DB {
+	if s.readDB != nil {
+		return s.readDB
+	}
+	return s.db
 }
 
 var retiredAdminAlertRuleIDs = []string{"probe_latency_high", "probe_loss_high", "node_recovered"}
@@ -412,7 +420,8 @@ func (s *sqliteAdminAlertRules) pruneRetiredNotificationConfig(ctx context.Conte
 }
 
 func (s *sqliteAdminAlertRules) AdminAlertRules(ctx context.Context) ([]AdminAlertRule, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	readDB := s.queryReadDB()
+	rows, err := readDB.QueryContext(ctx, `
 		SELECT id, name, category, metric, comparator, threshold, threshold_unit, duration_sec,
 		       enabled, notification_event_type, description, created_at, updated_at
 		FROM alert_rules
@@ -434,7 +443,7 @@ func (s *sqliteAdminAlertRules) AdminAlertRules(ctx context.Context) ([]AdminAle
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return s.attachAlertRuleMetadata(ctx, rules)
+	return s.attachAlertRuleMetadataWithDB(ctx, readDB, rules)
 }
 
 func (s *sqliteAdminAlertRules) UpdateAdminAlertRule(ctx context.Context, ruleID string, update AdminAlertRuleUpdateRequest) (AdminAlertRule, error) {
@@ -543,7 +552,11 @@ func (s *sqliteAdminAlertRules) adminAlertRuleByID(ctx context.Context, ruleID s
 }
 
 func (s *sqliteAdminAlertRules) attachAlertRuleMetadata(ctx context.Context, rules []AdminAlertRule) ([]AdminAlertRule, error) {
-	rules, err := s.attachAlertRuleScopes(ctx, rules)
+	return s.attachAlertRuleMetadataWithDB(ctx, s.db, rules)
+}
+
+func (s *sqliteAdminAlertRules) attachAlertRuleMetadataWithDB(ctx context.Context, targetDB *sql.DB, rules []AdminAlertRule) ([]AdminAlertRule, error) {
+	rules, err := s.attachAlertRuleScopesWithDB(ctx, targetDB, rules)
 	if err != nil {
 		return nil, err
 	}
@@ -551,7 +564,7 @@ func (s *sqliteAdminAlertRules) attachAlertRuleMetadata(ctx context.Context, rul
 		if rules[index].Metric != "expiry_days" {
 			continue
 		}
-		days, err := loadAlertRuleRenewalDays(ctx, s.db, rules[index])
+		days, err := loadAlertRuleRenewalDays(ctx, targetDB, rules[index])
 		if err != nil {
 			return nil, err
 		}
@@ -560,12 +573,12 @@ func (s *sqliteAdminAlertRules) attachAlertRuleMetadata(ctx context.Context, rul
 	return rules, nil
 }
 
-func (s *sqliteAdminAlertRules) attachAlertRuleScopes(ctx context.Context, rules []AdminAlertRule) ([]AdminAlertRule, error) {
+func (s *sqliteAdminAlertRules) attachAlertRuleScopesWithDB(ctx context.Context, targetDB *sql.DB, rules []AdminAlertRule) ([]AdminAlertRule, error) {
 	if len(rules) == 0 {
 		return rules, nil
 	}
 	for index := range rules {
-		scopeNodeIDs, err := s.alertRuleScopeNodeIDs(ctx, rules[index].ID)
+		scopeNodeIDs, err := alertRuleScopeNodeIDsFromDB(ctx, targetDB, rules[index].ID)
 		if err != nil {
 			return nil, err
 		}
@@ -574,8 +587,8 @@ func (s *sqliteAdminAlertRules) attachAlertRuleScopes(ctx context.Context, rules
 	return rules, nil
 }
 
-func (s *sqliteAdminAlertRules) alertRuleScopeNodeIDs(ctx context.Context, ruleID string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func alertRuleScopeNodeIDsFromDB(ctx context.Context, targetDB *sql.DB, ruleID string) ([]string, error) {
+	rows, err := targetDB.QueryContext(ctx, `
 		SELECT scope.node_id
 		FROM alert_rule_node_scopes scope
 		JOIN nodes n ON n.id = scope.node_id
@@ -730,5 +743,6 @@ func scanAdminAlertRule(scanner adminAlertRuleScanner) (AdminAlertRule, error) {
 	}
 	rule.CreatedAt = unixStringOr(createdAt, time.Now().UTC())
 	rule.UpdatedAt = unixStringOr(updatedAt, time.Now().UTC())
+	rule.ScopeNodeIDs = []string{}
 	return rule, nil
 }

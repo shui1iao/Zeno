@@ -12,6 +12,8 @@ type sqliteReadQueries struct {
 }
 
 func (s *sqliteReadQueries) nodes(ctx context.Context) ([]Node, error) {
+	now := time.Now()
+	today := now.Format("2006-01-02")
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT n.id, n.display_name, n.status, n.country_code, n.expiry_date, n.expiry_permanent, n.billing_cycle, n.renewal_amount, n.renewal_currency, fx.cny_rate, n.billing_mode, n.monthly_reset_day, n.last_seen_at,
 		       h.os_name, h.os_version, h.kernel, h.arch, h.virtualization, h.cpu_model, h.cpu_cores, h.memory_total_bytes, h.disk_total_bytes, h.boot_time,
@@ -24,12 +26,12 @@ func (s *sqliteReadQueries) nodes(ctx context.Context) ([]Node, error) {
 		         WHERE tm.node_id = n.id
 		           AND tm.billing_epoch = COALESCE(n.billing_traffic_epoch, 0)
 		           AND tm.month = CASE
-		             WHEN CAST(strftime('%d', 'now') AS INTEGER) < CASE
-		               WHEN (CASE WHEN COALESCE(n.monthly_reset_day, 1) BETWEEN 1 AND 31 THEN n.monthly_reset_day ELSE 1 END) > CAST(strftime('%d', date('now', 'start of month', '+1 month', '-1 day')) AS INTEGER)
-		               THEN CAST(strftime('%d', date('now', 'start of month', '+1 month', '-1 day')) AS INTEGER)
+		             WHEN CAST(strftime('%d', ?) AS INTEGER) < CASE
+		               WHEN (CASE WHEN COALESCE(n.monthly_reset_day, 1) BETWEEN 1 AND 31 THEN n.monthly_reset_day ELSE 1 END) > CAST(strftime('%d', date(?, 'start of month', '+1 month', '-1 day')) AS INTEGER)
+		               THEN CAST(strftime('%d', date(?, 'start of month', '+1 month', '-1 day')) AS INTEGER)
 		               ELSE (CASE WHEN COALESCE(n.monthly_reset_day, 1) BETWEEN 1 AND 31 THEN n.monthly_reset_day ELSE 1 END)
-		             END THEN strftime('%Y-%m', date('now', 'start of month', '-1 day'))
-		             ELSE strftime('%Y-%m', 'now')
+		             END THEN strftime('%Y-%m', date(?, 'start of month', '-1 day'))
+		             ELSE strftime('%Y-%m', ?)
 		           END
 		       ) AS billable_bytes,
 		       n.monthly_quota_bytes,
@@ -51,14 +53,13 @@ func (s *sqliteReadQueries) nodes(ctx context.Context) ([]Node, error) {
 		LEFT JOIN exchange_rates fx ON fx.currency = COALESCE(NULLIF(TRIM(n.renewal_currency), ''), 'CNY')
 		WHERE n.disabled = 0
 		ORDER BY n.display_order ASC, n.id ASC
-	`, int64(nodeHeartbeatOfflineAfter/time.Second))
+	`, today, today, today, today, today, int64(nodeHeartbeatOfflineAfter/time.Second))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	var nodes []Node
-	now := time.Now()
 	for rows.Next() {
 		var id, displayName, status string
 		var countryCode, expiryDate, billingCycle, renewalCurrency, billingMode, osName, osVersion, kernel, arch, virtualization, cpuModel sql.NullString
@@ -150,7 +151,8 @@ func (s *sqliteReadQueries) latestHomeLatencySummaries(ctx context.Context) (map
 		loss_by_node AS (
 			SELECT eligible.node_id, AVG(pr.loss_percent) AS loss_percent
 			FROM eligible_nodes eligible
-			JOIN probe_rounds pr ON pr.node_id = eligible.node_id AND pr.target_id = eligible.target_id
+			JOIN probe_rounds pr INDEXED BY idx_probe_rounds_node_target_ts_metrics
+			  ON pr.node_id = eligible.node_id AND pr.target_id = eligible.target_id
 			WHERE pr.ts >= ?
 			GROUP BY eligible.node_id
 		)
@@ -160,7 +162,7 @@ func (s *sqliteReadQueries) latestHomeLatencySummaries(ctx context.Context) (map
 		JOIN probe_targets pt ON pt.id = eligible.target_id
 		JOIN probe_rounds latest ON latest.id = (
 			SELECT candidate.id
-			FROM probe_rounds candidate
+			FROM probe_rounds candidate INDEXED BY idx_probe_rounds_node_target_ts
 			WHERE candidate.node_id = eligible.node_id
 			  AND candidate.target_id = eligible.target_id
 			  AND candidate.ts >= ?
@@ -248,7 +250,8 @@ func (s *sqliteReadQueries) homeLatencyHourlyHistory(ctx context.Context, now ti
 		SELECT eligible.node_id, (pr.ts / ?) * ? AS bucket_ts,
 		       AVG(COALESCE(pr.avg_ms, pr.median_ms)), AVG(pr.loss_percent)
 		FROM eligible_nodes eligible
-		JOIN probe_rounds pr ON pr.node_id = eligible.node_id AND pr.target_id = eligible.target_id
+		JOIN probe_rounds pr INDEXED BY idx_probe_rounds_node_target_ts_metrics
+		  ON pr.node_id = eligible.node_id AND pr.target_id = eligible.target_id
 		WHERE pr.ts >= ? AND pr.ts < ?
 		GROUP BY eligible.node_id, bucket_ts
 		ORDER BY eligible.node_id ASC, bucket_ts ASC
@@ -305,7 +308,7 @@ func (s *sqliteReadQueries) latestLatencySummariesByNode(ctx context.Context) (m
 		JOIN probe_targets pt ON pt.id = npt.target_id
 		JOIN probe_rounds pr ON pr.id = (
 			SELECT candidate.id
-			FROM probe_rounds candidate
+			FROM probe_rounds candidate INDEXED BY idx_probe_rounds_node_target_ts
 			WHERE candidate.node_id = npt.node_id
 			  AND candidate.target_id = npt.target_id
 			ORDER BY candidate.ts DESC, candidate.id DESC
@@ -388,31 +391,46 @@ func (s *sqliteReadQueries) populateServiceTargetLatencySummaries(ctx context.Co
 	since := time.Now().UTC().Add(-24 * time.Hour).Unix()
 	rows, err := s.db.QueryContext(ctx, `
 		WITH reporting AS (
-			SELECT pr.target_id, COUNT(DISTINCT pr.node_id) AS reporting_node_count
-			FROM probe_rounds pr
-			JOIN nodes n ON n.id = pr.node_id
-			JOIN node_probe_targets npt ON npt.node_id = pr.node_id AND npt.target_id = pr.target_id
-			WHERE pr.ts >= ?
-			  AND n.disabled = 0
+			SELECT npt.target_id, COUNT(*) AS reporting_node_count
+			FROM node_probe_targets npt
+			JOIN nodes n ON n.id = npt.node_id
+			WHERE n.disabled = 0
 			  AND npt.enabled = 1
-			GROUP BY pr.target_id
+			  AND EXISTS (
+				SELECT 1
+				FROM probe_rounds pr INDEXED BY idx_probe_rounds_node_target_ts
+				WHERE pr.node_id = npt.node_id
+				  AND pr.target_id = npt.target_id
+				  AND pr.ts >= ?
+				LIMIT 1
+			  )
+			GROUP BY npt.target_id
+		),
+		active_latest AS (
+			SELECT npt.target_id,
+			       r.id,
+			       r.ts,
+			       r.median_ms,
+			       r.avg_ms,
+			       r.loss_percent,
+			       ROW_NUMBER() OVER (PARTITION BY npt.target_id ORDER BY r.ts DESC, r.id DESC) AS rn
+			FROM node_probe_targets npt
+			JOIN nodes n ON n.id = npt.node_id
+			JOIN probe_rounds r ON r.id = (
+				SELECT candidate.id
+				FROM probe_rounds candidate INDEXED BY idx_probe_rounds_node_target_ts
+				WHERE candidate.node_id = npt.node_id
+				  AND candidate.target_id = npt.target_id
+				ORDER BY candidate.ts DESC, candidate.id DESC
+				LIMIT 1
+			)
+			WHERE n.disabled = 0
+			  AND npt.enabled = 1
 		)
 		SELECT pt.id, COALESCE(reporting.reporting_node_count, 0),
 		       latest.median_ms, latest.avg_ms, latest.loss_percent, latest.ts
 		FROM probe_targets pt
-		JOIN probe_rounds latest ON latest.id = (
-			SELECT candidate.id
-			FROM probe_rounds candidate
-			JOIN nodes candidate_node ON candidate_node.id = candidate.node_id
-			JOIN node_probe_targets candidate_assignment
-			  ON candidate_assignment.node_id = candidate.node_id
-			 AND candidate_assignment.target_id = candidate.target_id
-			WHERE candidate.target_id = pt.id
-			  AND candidate_node.disabled = 0
-			  AND candidate_assignment.enabled = 1
-			ORDER BY candidate.ts DESC, candidate.id DESC
-			LIMIT 1
-		)
+		JOIN active_latest latest ON latest.target_id = pt.id AND latest.rn = 1
 		LEFT JOIN reporting ON reporting.target_id = pt.id
 		WHERE NOT EXISTS (
 			SELECT 1 FROM admin_deletion_jobs deletion

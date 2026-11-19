@@ -13,6 +13,9 @@ export interface NodeDetailRouteProps {
   expireAdminSession: (identity: AdminTokenIdentity) => boolean
   onBack: () => void
   topHeader: ReactNode
+  targetOrderOverride?: string[]
+  /** Opens the backend; offered to signed-in administrators only. */
+  onAdmin?: () => void
 }
 
 function summaryLatencyPoints(node: HomeCardNode): LatencyPoint[] {
@@ -28,7 +31,7 @@ function summaryLatencyPoints(node: HomeCardNode): LatencyPoint[] {
     }))
 }
 
-export function NodeDetailRoute({ node, summary, adminToken, expireAdminSession, onBack, topHeader }: NodeDetailRouteProps) {
+export function NodeDetailRoute({ node, summary, adminToken, expireAdminSession, onBack, topHeader, targetOrderOverride, onAdmin }: NodeDetailRouteProps) {
   const {
     nodeLatencyRange,
     stateRange,
@@ -59,7 +62,8 @@ export function NodeDetailRoute({ node, summary, adminToken, expireAdminSession,
       onRangeChange={setNodeLatencyRange}
       onStateRangeChange={setStateRange}
       topHeader={topHeader}
-      targetOrder={summary?.services.map((service) => service.id)}
+      targetOrder={targetOrderOverride ?? summary?.services.map((service) => service.id)}
+      onManageTargets={adminToken !== '' ? onAdmin : undefined}
     />
   )
 }

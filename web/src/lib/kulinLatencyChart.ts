@@ -195,9 +195,9 @@ export function applyKulinPeakCut(rows: KulinChartRow[], keysToProcess: string[]
   const ewmaHistory: Record<string, number> = {}
 
   return rows.map((point, index) => {
-    if (index < windowSize - 1) return point
-
-    const window = rows.slice(index - windowSize + 1, index + 1)
+    const window = index < windowSize - 1
+      ? rows.slice(0, Math.min(rows.length, windowSize))
+      : rows.slice(index - windowSize + 1, index + 1)
     const smoothed: KulinChartRow = { ...point }
 
     for (const key of keysToProcess) {

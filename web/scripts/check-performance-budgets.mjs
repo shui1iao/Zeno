@@ -74,7 +74,9 @@ let chunkBytes = 0
 for (const name of distFiles.filter((value) => value.endsWith('.js'))) {
   chunkBytes += (await stat(path.join(assetsDir, name))).size
 }
-const maxJavaScriptBytes = 420 * 1024
+// Accounts for the lazy list view, status matrix, loss lane, and live appearance preview
+// while keeping the public initial JavaScript budget (260 KiB raw / 82 KiB gzip) unchanged.
+const maxJavaScriptBytes = 440 * 1024
 if (chunkBytes > maxJavaScriptBytes) {
   throw new Error(`total production JavaScript exceeds budget: ${chunkBytes}/${maxJavaScriptBytes}`)
 }

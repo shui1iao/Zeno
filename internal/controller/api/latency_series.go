@@ -86,65 +86,140 @@ func latencyPointFromSeries(series LatencySeries, createdAt int64, index int) La
 
 func latencySeriesPayloadFromPoints(points []LatencyPoint) ([]int64, []LatencySeries) {
 	series := latencySeriesFromPoints(points)
-	shared := sharedSeriesCreatedAt(series, func(series LatencySeries) []int64 { return series.CreatedAt })
-	if len(shared) > 0 {
-		for index := range series {
-			series[index].CreatedAt = nil
+	if len(series) == 0 || len(series[0].CreatedAt) == 0 {
+		return nil, series
+	}
+	shared := series[0].CreatedAt
+	for index := 1; index < len(series); index++ {
+		if !sameInt64Slice(shared, series[index].CreatedAt) {
+			return nil, series
 		}
+	}
+	for index := range series {
+		series[index].CreatedAt = nil
 	}
 	return shared, series
 }
 
-func latencySeriesFromPoints(points []LatencyPoint) []LatencySeries {
-	return groupLatencySeries(points, latencySeriesIdentity, appendLatencySeriesPoint)
+type floatSlab struct {
+	buf []float64
 }
 
-func latencySeriesIdentity(point LatencyPoint) (string, LatencySeries) {
-	return point.TargetID, LatencySeries{TargetID: point.TargetID, TargetName: point.TargetName}
-}
-
-func appendLatencySeriesPoint(series *LatencySeries, point LatencyPoint) {
-	appendLatencySeriesValues(&series.CreatedAt, &series.MedianMS, &series.AvgMS, &series.LossPercent, point.TS, point.MedianMS, point.AvgMS, point.LossPercent)
-}
-
-func appendLatencySeriesValues(createdAt *[]int64, median, average *[]*float64, lossPercent *[]float64, timestamp string, medianMS, averageMS *float64, loss float64) {
-	*createdAt = append(*createdAt, latencyTimestampMillis(timestamp))
-	*median = append(*median, compactLatencyValue(medianMS))
-	*average = append(*average, compactLatencyValue(averageMS))
-	*lossPercent = append(*lossPercent, compactLatencyNumber(loss))
-}
-
-func groupLatencySeries[P, S any](points []P, newSeries func(P) (string, S), appendPoint func(*S, P)) []S {
-	order := make([]string, 0)
-	byID := make(map[string]*S)
-	for _, point := range points {
-		id, initial := newSeries(point)
-		series := byID[id]
-		if series == nil {
-			series = &initial
-			byID[id] = series
-			order = append(order, id)
+func (s *floatSlab) alloc(v float64) *float64 {
+	if len(s.buf) == cap(s.buf) {
+		size := 512
+		if cap(s.buf) > 0 && cap(s.buf) < 8192 {
+			size = cap(s.buf) * 2
+		} else if cap(s.buf) >= 8192 {
+			size = 8192
 		}
-		appendPoint(series, point)
+		s.buf = make([]float64, 0, size)
 	}
-	seriesList := make([]S, 0, len(order))
-	for _, id := range order {
-		seriesList = append(seriesList, *byID[id])
+	idx := len(s.buf)
+	s.buf = append(s.buf, v)
+	return &s.buf[idx]
+}
+
+func latencySeriesFromPoints(points []LatencyPoint) []LatencySeries {
+	n := len(points)
+	if n == 0 {
+		return []LatencySeries{}
+	}
+	indexByID := make(map[string]int, 16)
+	seriesList := make([]LatencySeries, 0, 16)
+	counts := make([]int, 0, 16)
+	nonNilFloats := 0
+	nextGuess := 0
+	for i := range points {
+		p := &points[i]
+		var idx int
+		if nextGuess < len(seriesList) && seriesList[nextGuess].TargetID == p.TargetID {
+			idx = nextGuess
+		} else {
+			var exists bool
+			idx, exists = indexByID[p.TargetID]
+			if !exists {
+				idx = len(seriesList)
+				indexByID[p.TargetID] = idx
+				seriesList = append(seriesList, LatencySeries{
+					TargetID:   p.TargetID,
+					TargetName: p.TargetName,
+				})
+				counts = append(counts, 0)
+			}
+		}
+		counts[idx]++
+		nextGuess = idx + 1
+		if nextGuess == len(seriesList) {
+			nextGuess = 0
+		}
+		if p.MedianMS != nil {
+			nonNilFloats++
+		}
+		if p.AvgMS != nil {
+			nonNilFloats++
+		}
+	}
+
+	createdAtSlab := make([]int64, 0, n)
+	medianSlab := make([]*float64, 0, n)
+	avgSlab := make([]*float64, 0, n)
+	lossSlab := make([]float64, 0, n)
+	floatValues := floatSlab{buf: make([]float64, 0, nonNilFloats)}
+	offset := 0
+	for i, count := range counts {
+		end := offset + count
+		seriesList[i].CreatedAt = createdAtSlab[offset:offset:end]
+		seriesList[i].MedianMS = medianSlab[offset:offset:end]
+		seriesList[i].AvgMS = avgSlab[offset:offset:end]
+		seriesList[i].LossPercent = lossSlab[offset:offset:end]
+		offset = end
+	}
+
+	var lastTS string
+	var lastMillis int64
+	var hasLastTS bool
+	nextGuess = 0
+	for i := range points {
+		p := &points[i]
+		var idx int
+		if nextGuess < len(seriesList) && seriesList[nextGuess].TargetID == p.TargetID {
+			idx = nextGuess
+		} else {
+			idx = indexByID[p.TargetID]
+		}
+		nextGuess = idx + 1
+		if nextGuess == len(seriesList) {
+			nextGuess = 0
+		}
+
+		var tsMillis int64
+		if p.TSUnix > 0 {
+			tsMillis = p.TSUnix * 1000
+		} else if hasLastTS && p.TS == lastTS {
+			tsMillis = lastMillis
+		} else {
+			tsMillis = latencyTimestampMillis(p.TS)
+			lastTS = p.TS
+			lastMillis = tsMillis
+			hasLastTS = true
+		}
+
+		s := &seriesList[idx]
+		s.CreatedAt = append(s.CreatedAt, tsMillis)
+		if p.MedianMS != nil {
+			s.MedianMS = append(s.MedianMS, floatValues.alloc(compactLatencyNumber(*p.MedianMS)))
+		} else {
+			s.MedianMS = append(s.MedianMS, nil)
+		}
+		if p.AvgMS != nil {
+			s.AvgMS = append(s.AvgMS, floatValues.alloc(compactLatencyNumber(*p.AvgMS)))
+		} else {
+			s.AvgMS = append(s.AvgMS, nil)
+		}
+		s.LossPercent = append(s.LossPercent, compactLatencyNumber(p.LossPercent))
 	}
 	return seriesList
-}
-
-func sharedSeriesCreatedAt[S any](seriesList []S, createdAt func(S) []int64) []int64 {
-	if len(seriesList) == 0 || len(createdAt(seriesList[0])) == 0 {
-		return nil
-	}
-	shared := createdAt(seriesList[0])
-	for _, series := range seriesList[1:] {
-		if !sameInt64Slice(shared, createdAt(series)) {
-			return nil
-		}
-	}
-	return append([]int64(nil), shared...)
 }
 
 func sameInt64Slice(left, right []int64) bool {
@@ -157,14 +232,6 @@ func sameInt64Slice(left, right []int64) bool {
 		}
 	}
 	return true
-}
-
-func compactLatencyValue(value *float64) *float64 {
-	if value == nil {
-		return nil
-	}
-	compact := compactLatencyNumber(*value)
-	return &compact
 }
 
 func compactLatencyNumber(value float64) float64 {

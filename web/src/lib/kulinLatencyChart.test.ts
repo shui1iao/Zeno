@@ -116,4 +116,16 @@ describe('applyKulinPeakCut', () => {
     expect(processed.slice(0, 10).map((row) => row.alpha)).toEqual(Array(10).fill(10))
     expect(processed[10].alpha).toBe(10)
   })
+
+  it('suppresses leading spikes in the first ten samples so smoothed charts do not pin to 100% at the left edge', () => {
+    const rows = Array.from({ length: 12 }, (_, index) => ({
+      created_at: index,
+      alpha: index === 0 ? 5000 : 12,
+    }))
+
+    const processed = applyKulinPeakCut(rows, ['alpha'])
+
+    expect(processed[0].alpha).toBeCloseTo(12, 10)
+    expect(Math.max(...processed.map((row) => row.alpha ?? 0))).toBeCloseTo(12, 10)
+  })
 })

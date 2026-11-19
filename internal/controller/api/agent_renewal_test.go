@@ -135,14 +135,14 @@ func TestRenewalNotificationKeyAt(t *testing.T) {
 			}
 		})
 	}
-	// The reminder becomes due at the UTC day boundary, i.e. 08:00 in
-	// Shanghai, exactly like the legacy scanner's dateOnlyUTC semantics.
+	// The reminder becomes due at the caller's local day boundary (00:00 in
+	// Shanghai when now is in Asia/Shanghai, rather than 08:00 UTC midnight).
 	node := renewalTestNode("2026-10-10", "", false)
-	if got := renewalNotificationKeyAt(node, renewalTestRules(3), shanghaiTime(2026, 10, 7, 7, 59, 59), true); got != "" {
-		t.Fatalf("key before the UTC day boundary = %q", got)
+	if got := renewalNotificationKeyAt(node, renewalTestRules(3), shanghaiTime(2026, 10, 6, 23, 59, 59), true); got != "" {
+		t.Fatalf("key before the Shanghai local day boundary = %q", got)
 	}
-	if got := renewalNotificationKeyAt(node, renewalTestRules(3), shanghaiTime(2026, 10, 7, 8, 0, 0), true); got != "2026-10-10#3" {
-		t.Fatalf("key at the UTC day boundary = %q", got)
+	if got := renewalNotificationKeyAt(node, renewalTestRules(3), shanghaiTime(2026, 10, 7, 0, 0, 0), true); got != "2026-10-10#3" {
+		t.Fatalf("key at the Shanghai local day boundary = %q", got)
 	}
 }
 

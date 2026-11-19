@@ -11,6 +11,9 @@ import { availableHistoryRanges } from '../lib/historyRange'
 import { HistoryRangeSelector } from './HistoryRangeSelector'
 import { SmoothingSelector, type SmoothingMode } from './SmoothingSelector'
 import { latencyTargetCorners } from '../lib/targetGridCorners'
+// Via ServerCard (entry chunk) so the shared helper does not split into an extra preloaded chunk.
+import { expiryBadge } from './ServerCard'
+import { formatCurrencyAmount, normalizeCurrencyCode } from '../lib/currency'
 
 const DESKTOP_LATENCY_COLUMNS = 7
 const MOBILE_LATENCY_COLUMNS = 3
@@ -32,6 +35,8 @@ interface LatencyDetailProps {
   topHeader?: ReactNode
   /** Global latency-target order from the admin list; drives series colours. */
   targetOrder?: string[]
+  /** Administrators can jump to the backend to assign latency targets. */
+  onManageTargets?: () => void
 }
 
 export function LatencyDetail({
@@ -50,6 +55,7 @@ export function LatencyDetail({
   onStateRangeChange = () => {},
   topHeader,
   targetOrder = [],
+  onManageTargets,
 }: LatencyDetailProps) {
   const targetSummaries = useMemo(() => summarizeLatencyTargets(points), [points])
   const targetOrderKey = targetOrder.join('\n')
@@ -58,23 +64,32 @@ export function LatencyDetail({
     [targetOrderKey, targetSummaries],
   )
   const [activeTargetIds, setActiveTargetIds] = useState<string[]>([])
+  const [hoverTargetId, setHoverTargetId] = useState<string | null>(null)
   const [smoothing, setSmoothing] = useState<SmoothingMode>('raw')
   const peakCut = smoothing === 'smooth'
   const rangeOptions = availableHistoryRanges(canUseExtendedRanges)
   const rangeLabel = rangeOptions.find((option) => option.value === range)?.label ?? range
   const latestState = latestStatePoint(statePoints)
   const visualStatus = node.status === 'warning' ? 'warning' : node.status === 'online' ? 'online' : 'offline'
+  const isOfflineNode = visualStatus === 'offline'
   const summaryUptimeSeconds = node.uptimeSeconds ?? null
-  const uptimeValue = latestState?.uptimeSeconds !== null && latestState?.uptimeSeconds !== undefined
-    ? formatUptime(latestState.uptimeSeconds)
-    : summaryUptimeSeconds !== null
-      ? formatUptime(summaryUptimeSeconds)
-      : formatUptimeFromBootTime(node.bootTime)
+  const uptimeValue = isOfflineNode
+    ? null
+    : latestState?.uptimeSeconds !== null && latestState?.uptimeSeconds !== undefined
+      ? formatUptime(latestState.uptimeSeconds)
+      : summaryUptimeSeconds !== null
+        ? formatUptime(summaryUptimeSeconds)
+        : formatUptimeFromBootTime(node.bootTime)
   // Memory, disk and load are left to the resource panel below and the home card;
   // the header keeps what neither of them shows.
   const bootValue = formatBootShort(node.bootTime)
-  const runtimeValue = uptimeValue ? (bootValue ? `${uptimeValue} · ${bootValue} 起` : uptimeValue) : null
+  const runtimeValue = isOfflineNode
+    ? (bootValue ? `离线 · 上次启动 ${bootValue}` : '离线')
+    : uptimeValue
+      ? (bootValue ? `${uptimeValue} · ${bootValue} 起` : uptimeValue)
+      : null
   const hasLatencyData = points.length > 0 || targetSummaries.length > 0
+  const hasLatencySamples = targetSummaries.some((target) => target.sampleCount > 0)
   const showLatencySkeleton = loading && !hasLatencyData && !error
   const desktopLatencyLastRowStart = Math.floor((targetSummaries.length - 1) / DESKTOP_LATENCY_COLUMNS) * DESKTOP_LATENCY_COLUMNS
   const mobileLatencyLastRowStart = Math.floor((targetSummaries.length - 1) / MOBILE_LATENCY_COLUMNS) * MOBILE_LATENCY_COLUMNS
@@ -99,12 +114,20 @@ export function LatencyDetail({
               <span className={`detail-status-pill status-${visualStatus}`}>{formatStatusLabel(node.status)}</span>
             </div>
           </div>
+          {isOfflineNode && (
+            <div className="detail-offline-banner" role="status">
+              <OfflineIcon />
+              <span>节点已离线</span>
+              <em>{bootValue ? `上次启动 ${bootValue} · 以下为离线前的历史数据` : '以下为离线前的历史数据'}</em>
+            </div>
+          )}
           <section className="detail-fact-strip detail-fact-strip--server" aria-label={`${node.displayName} server facts`}>
             <InfoFact label="系统" value={formatSystemSpec(node)} wide />
             <InfoFact label="CPU" value={formatCpuSpec(node)} wide />
             <InfoFact label="平台" value={formatPlatform(node.virtualization)} />
             <InfoFact label="运行时间" value={runtimeValue ?? '--'} adaptive pending={!runtimeValue} />
             <TrafficFact sent={formatBinaryBytes(node.netOutTotalBytes)} received={formatBinaryBytes(node.netInTotalBytes)} />
+            <BillingFact node={node} />
           </section>
         </section>
       </section>
@@ -152,31 +175,44 @@ export function LatencyDetail({
                     data-mobile-full-row-end={(index + 1) % MOBILE_LATENCY_COLUMNS === 0}
                     data-mobile-last-row={index >= mobileLatencyLastRowStart}
                     onClick={() => toggleTarget(target.targetId)}
+                    onPointerEnter={() => setHoverTargetId(target.targetId)}
+                    onPointerLeave={() => setHoverTargetId((current) => (current === target.targetId ? null : current))}
                   >
                     <span className="latency-target-name">
                       <i className="latency-target-color" style={{ backgroundColor: seriesColors.get(target.targetId) }} aria-hidden="true" />
                       <span>{target.targetName}</span>
                     </span>
-                    <strong>{formatLatency(target.avgMs)}</strong>
+                    <strong><LatencyReading value={target.avgMs} /></strong>
                     <em className="latency-target-loss" data-tone={packetLossTone(target.lossPercent)}><PacketLossIcon />丢包 {formatLossPercent(target.lossPercent)}</em>
                 </button>
               ))}
             </div>
 
-            <LatencyChart
-              points={points}
-              title={`${node.displayName} 网络延迟`}
-              eyebrow={`${rangeLabel} · ${targetSummaries.length} 个监控服务${peakCut ? ' · 平滑' : ''}`}
-              compactHeader
-              hideHeader
-              hideLegend
-              peakCut={peakCut}
-              activeTargetIds={activeTargetIds}
-              seriesColors={seriesColors}
-            />
+            {hasLatencySamples ? (
+              <LatencyChart
+                points={points}
+                title={`${node.displayName} 网络延迟`}
+                eyebrow={`${rangeLabel} · ${targetSummaries.length} 个监控服务${peakCut ? ' · 平滑' : ''}`}
+                compactHeader
+                hideHeader
+                hideLegend
+                peakCut={peakCut}
+                activeTargetIds={activeTargetIds}
+                highlightTargetId={hoverTargetId}
+                seriesColors={seriesColors}
+              />
+            ) : (
+              <div className="detail-state" data-state="empty" role="status" aria-live="polite">暂无网络延迟历史</div>
+            )}
           </>
         )}
-        {!showLatencySkeleton && !error && !hasLatencyData && <div className="detail-state" data-state="empty" role="status" aria-live="polite">暂无网络延迟历史</div>}
+        {!showLatencySkeleton && !error && !hasLatencyData && (
+          <div className="detail-state detail-state--empty-targets" data-state="empty" role="status" aria-live="polite">
+            <span>暂无网络延迟历史</span>
+            <small>这台服务器还没有关联延迟监控，或监控尚未产生数据。</small>
+            {onManageTargets && <button type="button" className="detail-empty-action" onClick={onManageTargets}>去后台分配延迟监控</button>}
+          </div>
+        )}
       </section>
 
       <StateHistoryPanel
@@ -188,6 +224,41 @@ export function LatencyDetail({
         canUseExtendedRanges={canUseExtendedRanges}
       />
     </div>
+  )
+}
+
+function LatencyReading({ value }: { value: number | null | undefined }) {
+  const text = formatLatency(value)
+  if (text === '--') return <>--</>
+  const [amount, unit] = text.split(' ')
+  return <>{amount} <small>{unit}</small></>
+}
+
+function OfflineIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </svg>
+  )
+}
+
+function BillingFact({ node }: { node: HomeCardNode }) {
+  const expiry = expiryBadge(node.expiryLabel)
+  const amount = node.renewalAmount
+  const hasAmount = amount !== null && amount !== undefined && Number.isFinite(amount) && amount > 0
+  const cycle = (node.billingCycle ?? '').trim()
+  const bill = hasAmount ? `${formatCurrencyAmount(amount, normalizeCurrencyCode(node.renewalCurrency), { spaced: true })}${cycle ? ` / ${cycle}` : ''}` : '--'
+  const remaining = !expiry ? null : expiry.days === null ? expiry.text : expiry.days < 0 ? '已过期' : `剩余 ${expiry.days} 天`
+  return (
+    <article className="detail-fact detail-fact--billing" title={`账单: ${bill}${remaining ? ` · ${remaining}` : ''}`}>
+      <p>账单</p>
+      <strong>
+        <span className="detail-fact-chunk">{bill}</span>
+        {remaining && <> <span className="detail-fact-chunk detail-billing-remaining">· {remaining}</span></>}
+      </strong>
+    </article>
   )
 }
 

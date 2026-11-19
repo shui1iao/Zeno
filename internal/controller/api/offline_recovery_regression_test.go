@@ -184,3 +184,34 @@ func TestStaleOfflineScannerWaitsForStartupGrace(t *testing.T) {
 	}
 	t.Fatalf("status after startup grace = %q, want offline", status)
 }
+
+func TestStartupOfflineGraceSuppressesFalseRestartOfflineStormThenAlertsTrulyOfflineNode(t *testing.T) {
+	start := shanghaiTime(2026, 10, 8, 9, 0, 0)
+	hs := newReconcileHarness(t, start)
+	hs.addNode("recovered", "Recovered Node", "203.0.113.71")
+	hs.addNode("truly-down", "Truly Down Node", "203.0.113.72")
+	hs.round()
+	hs.expectAcked()
+
+	// Simulate a Controller restart with DefaultStartupOfflineGrace (3m).
+	restartAt := start.Add(5 * time.Minute)
+	hs.clock.Set(restartAt)
+	hs.restart()
+	hs.h.startedAt = restartAt
+	hs.h.startupOfflineGrace = DefaultStartupOfflineGrace
+
+	staleSeen := restartAt.Add(-2 * time.Minute).Unix()
+	hs.setLiveness("recovered", "offline", staleSeen)
+	hs.setLiveness("truly-down", "offline", staleSeen)
+
+	// At +60s and +179s inside the 3m grace window, neither node emits a false alert.
+	hs.at(restartAt.Add(60 * time.Second))
+	hs.at(restartAt.Add(179 * time.Second))
+	hs.expectAcked()
+
+	// "recovered" reconnects before the grace window ends; it must never emit alert or recovery.
+	hs.setLiveness("recovered", "online", restartAt.Add(179*time.Second).Unix())
+	hs.at(restartAt.Add(DefaultStartupOfflineGrace))
+	hs.expectAcked("🔴[离线] Truly Down Node(203.0.***.***)")
+}
+

@@ -3,7 +3,6 @@ package api
 import (
 	"database/sql"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -16,18 +15,20 @@ import (
 // After the due date passes without a new billing cycle the key stays the
 // same, so the reminder is never repeated.
 //
-// All dates keep the historical UTC calendar-day semantics (dateOnlyUTC).
+// All calendar-day comparisons follow now.Location() (time.Local in production,
+// or the caller-supplied location in unit tests).
 
 func renewalNotificationDueDate(rawDate string, billingCycle sql.NullString, now time.Time) (time.Time, bool) {
 	cycleMonths := billingCycleMonths(billingCycle)
 	if cycleMonths > 0 {
 		return nextBillingCycleDate(rawDate, cycleMonths, now)
 	}
-	expiresAt, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(rawDate), time.UTC)
+	loc := effectiveTimeLocation(now)
+	expiresAt, err := time.ParseInLocation("2006-01-02", strings.TrimSpace(rawDate), loc)
 	if err != nil {
 		return time.Time{}, false
 	}
-	return dateOnlyUTC(expiresAt), true
+	return dateOnlyInLocation(expiresAt, loc), true
 }
 
 // renewalReminderDate is the day a threshold fires. "提前 1 个月" is a calendar
@@ -42,13 +43,15 @@ func renewalReminderDate(dueDate time.Time, threshold int) time.Time {
 }
 
 func renewalRulesMatch(rules []AdminAlertRule, dueDate, today time.Time) bool {
-	today = dateOnlyUTC(today)
+	loc := effectiveTimeLocation(today)
+	today = dateOnlyInLocation(today, loc)
+	dueDate = dateOnlyInLocation(dueDate, loc)
 	for _, rule := range rules {
 		if !renewalRuleApplies(rule) {
 			continue
 		}
 		for _, threshold := range effectiveRenewalNoticeDays(rule) {
-			if renewalReminderDate(dueDate, threshold).Equal(today) {
+			if calendarDaysBetween(renewalReminderDate(dueDate, threshold), today) == 0 {
 				return true
 			}
 		}
@@ -86,12 +89,13 @@ func renewalNotificationKeyAt(node notificationReconcileNode, rules []AdminAlert
 	if node.ExpiryPermanent || strings.TrimSpace(node.ExpiryDate) == "" {
 		return ""
 	}
-	now = now.UTC()
+	loc := effectiveTimeLocation(now)
+	now = now.In(loc)
 	dueDate, ok := renewalNotificationDueDate(node.ExpiryDate, node.BillingCycle, now)
 	if !ok {
 		return ""
 	}
-	today := dateOnlyUTC(now)
+	today := dateOnlyInLocation(now, loc)
 	found := false
 	var bestDate time.Time
 	bestThreshold := 0
@@ -100,7 +104,7 @@ func renewalNotificationKeyAt(node notificationReconcileNode, rules []AdminAlert
 			continue
 		}
 		for _, threshold := range effectiveRenewalNoticeDays(rule) {
-			reminder := renewalReminderDate(dueDate, threshold)
+			reminder := dateOnlyInLocation(renewalReminderDate(dueDate, threshold), loc)
 			if reminder.After(today) || (!includeToday && reminder.Equal(today)) {
 				continue
 			}
@@ -118,8 +122,7 @@ func renewalNotificationKeyAt(node notificationReconcileNode, rules []AdminAlert
 }
 
 func renewalDaysRemaining(dueDate, now time.Time) int {
-	today := dateOnlyUTC(now.UTC())
-	return int(math.Ceil(dateOnlyUTC(dueDate).Sub(today).Hours() / 24))
+	return calendarDaysBetween(now, dueDate)
 }
 
 // renewalNotificationMark is the legacy notification_event_marks key for a

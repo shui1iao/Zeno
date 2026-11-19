@@ -23,6 +23,7 @@ func (s *SQLiteStore) ensureSchema(ctx context.Context) error {
 		// statement is a harmless no-op in both of those cases.
 		`PRAGMA auto_vacuum = INCREMENTAL;`,
 		`PRAGMA journal_mode = WAL;`,
+		`PRAGMA synchronous = FULL;`,
 		`PRAGMA busy_timeout = 1000;`,
 		`CREATE TABLE IF NOT EXISTS schema_migrations (
 			name TEXT PRIMARY KEY,
@@ -220,6 +221,10 @@ func (s *SQLiteStore) ensureSchema(ctx context.Context) error {
 			error TEXT
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_probe_rounds_node_target_ts ON probe_rounds(node_id, target_id, ts);`,
+		`CREATE INDEX IF NOT EXISTS idx_probe_rounds_node_target_ts_metrics ON probe_rounds(node_id, target_id, ts, loss_percent, avg_ms, median_ms);`,
+		// Keep idx_probe_rounds_node_ts(node_id, ts): it is NOT a left prefix of
+		// idx_probe_rounds_node_target_ts(node_id, target_id, ts) and backs
+		// node-scoped latency grid and batched deletion queries without target_id.
 		`CREATE INDEX IF NOT EXISTS idx_probe_rounds_node_ts ON probe_rounds(node_id, ts);`,
 		`CREATE INDEX IF NOT EXISTS idx_probe_rounds_target_ts ON probe_rounds(target_id, ts);`,
 		`CREATE INDEX IF NOT EXISTS idx_probe_rounds_ts_target_node ON probe_rounds(ts, target_id, node_id);`,
@@ -339,7 +344,6 @@ func (s *SQLiteStore) ensureSchema(ctx context.Context) error {
 			updated_at INTEGER NOT NULL,
 			delivered_at INTEGER
 		);`,
-		`CREATE INDEX IF NOT EXISTS idx_notification_deliveries_pending ON notification_deliveries(state, next_attempt_at, id);`,
 		// notification_states holds, per channel, node and kind, only what the
 		// user was last told. The actual state is always read from its
 		// authoritative tables. Channel rows are removed explicitly when a
@@ -492,21 +496,6 @@ func (s *SQLiteStore) ensureSchema(ctx context.Context) error {
 	}
 	stage.columns("notification-delivery-columns", "notification_deliveries", notificationDeliveryColumns)
 	stage.run("notification-routing-bindings", func() error { return s.migrateNotificationRoutingBindings(ctx) })
-	// The legacy delivery columns and indexes are kept so a rollback to the
-	// outbox release finds the schema it expects. This release never writes
-	// notification_deliveries.
-	stage.run("notification-delivery-indexes", func() error {
-		for _, statement := range []string{
-			`CREATE INDEX IF NOT EXISTS idx_notification_deliveries_claim ON notification_deliveries(state, next_attempt_at, lease_until, id)`,
-			`CREATE INDEX IF NOT EXISTS idx_notification_deliveries_causal ON notification_deliveries(channel_id, node_id, event_type, id, state)`,
-			`CREATE INDEX IF NOT EXISTS idx_notification_deliveries_event_route ON notification_deliveries(channel_id, channel_version, destination_fingerprint, event_id, state)`,
-		} {
-			if _, err := s.db.ExecContext(ctx, statement); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 	stage.run("traffic-monthly-schema", func() error { return s.migrateTrafficMonthlySchema(ctx) })
 	stage.columns("traffic-monthly-columns", "traffic_monthly", map[string]string{
 		"counter_source": "TEXT NOT NULL DEFAULT ''",
@@ -541,6 +530,19 @@ func (s *SQLiteStore) ensureSchema(ctx context.Context) error {
 	stage.run("retired-notification-config-prune", func() error { return s.pruneRetiredNotificationConfig(ctx) })
 	// Runs after channel bindings and default alert rules exist.
 	stage.run("notification-reconcile-seed", func() error { return s.seedNotificationStatesFromLegacy(ctx) })
+	stage.run("notification-delivery-indexes", func() error {
+		for _, statement := range []string{
+			`DROP INDEX IF EXISTS idx_notification_deliveries_pending`,
+			`DROP INDEX IF EXISTS idx_notification_deliveries_claim`,
+			`DROP INDEX IF EXISTS idx_notification_deliveries_causal`,
+			`DROP INDEX IF EXISTS idx_notification_deliveries_event_route`,
+		} {
+			if _, err := s.db.ExecContext(ctx, statement); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	return stage.result()
 }
 
@@ -558,6 +560,10 @@ func (s *sqliteSchemaStore) normalizeTrafficAggregateStorage(ctx context.Context
 		 WHERE typeof(in_bytes) <> 'integer' OR in_bytes < 0
 		    OR typeof(out_bytes) <> 'integer' OR out_bytes < 0
 		    OR typeof(billable_bytes) <> 'integer' OR billable_bytes < 0`,
+		`UPDATE traffic_monthly
+		 SET billable_bytes = MAX(in_bytes, out_bytes)
+		 WHERE LOWER(TRIM(billing_mode)) IN ('max', 'higher')
+		   AND billable_bytes <> MAX(in_bytes, out_bytes)`,
 		`UPDATE traffic_lifetime SET
 			in_bytes = CASE WHEN typeof(in_bytes) <> 'integer' OR in_bytes < 0 THEN ` + maxInt64 + ` ELSE in_bytes END,
 			out_bytes = CASE WHEN typeof(out_bytes) <> 'integer' OR out_bytes < 0 THEN ` + maxInt64 + ` ELSE out_bytes END

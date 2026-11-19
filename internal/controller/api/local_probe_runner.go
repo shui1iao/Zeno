@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,9 +22,27 @@ import (
 type ProbeRunner func(ctx context.Context, target ProbeTarget) ([]probe.Sample, error)
 
 var (
-	errProbeHTTPSDowngrade = errors.New("probe redirect from https to http refused")
-	errProbeRedirectLimit  = errors.New("probe redirect limit exceeded")
-	errProbeURLPolicy      = errors.New("probe URL violates transport policy")
+	errProbeHTTPSDowngrade    = errors.New("probe redirect from https to http refused")
+	errProbeRedirectLimit     = errors.New("probe redirect limit exceeded")
+	errProbeURLPolicy         = errors.New("probe URL violates transport policy")
+	errInvalidLocalPingTarget = errors.New("invalid ping probe target")
+	errUnsafeLocalPingTarget  = errors.New("unsafe ping probe target")
+	errLocalPingDNS           = errors.New("ping probe DNS resolution failed")
+)
+
+var unsafeLocalPingPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("fc00::/7"),
+}
+
+var (
+	localPingLookupNetIP = func(ctx context.Context, host string) ([]netip.Addr, error) {
+		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	}
+	localPingExecCommand = defaultLocalPingExecCommand
 )
 
 const (
@@ -204,9 +225,14 @@ func RunHTTPProbe(ctx context.Context, target ProbeTarget) ([]probe.Sample, erro
 			samples = append(samples, failedMeasuredLocalProbeSample(seq, elapsedMS, "url_policy"))
 			continue
 		}
-		// HTTP probes measure reachability and time to response headers. The body
-		// is intentionally not validated or downloaded; closing it also prevents a
-		// slow or unbounded response stream from extending the probe round.
+		// HTTP probes measure reachability and time to response headers. Drain up to
+		// 4 KiB under a bounded grace window before closing so typical small responses
+		// reuse Keep-Alive connections without letting stalled streams hang the round.
+		if response.ContentLength <= 4096 {
+			drainTimer := time.AfterFunc(50*time.Millisecond, cancel)
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+			drainTimer.Stop()
+		}
 		_ = response.Body.Close()
 		cancel()
 		if response.StatusCode < 200 || response.StatusCode >= 400 {
@@ -255,6 +281,22 @@ func RunPingProbe(ctx context.Context, target ProbeTarget) ([]probe.Sample, erro
 	}
 	timeout := normalizedLocalProbeTimeout(target.TimeoutMS)
 	observationTimeout := localLatencyObservationTimeout(timeout)
+	resolved, resolveErr := resolveSafeLocalPingAddresses(ctx, target.Address, observationTimeout)
+	if resolveErr != nil {
+		if errors.Is(resolveErr, errUnsafeLocalPingTarget) {
+			return failedProbeSamples(count, "unsafe_target"), resolveErr
+		}
+		if errors.Is(resolveErr, errInvalidLocalPingTarget) {
+			return failedProbeSamples(count, "invalid_address"), resolveErr
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return failedProbeSamples(count, classifyProbeError(resolveErr)), nil
+	}
+
+	candidates := resolved
+	familyLocked := false
 	samples := make([]probe.Sample, 0, count)
 	for seq := 1; seq <= count; seq++ {
 		select {
@@ -262,28 +304,144 @@ func RunPingProbe(ctx context.Context, target ProbeTarget) ([]probe.Sample, erro
 			return samples, ctx.Err()
 		default:
 		}
-		pingCtx, cancel := context.WithTimeout(ctx, observationTimeout)
-		start := time.Now()
-		output, err := exec.CommandContext(pingCtx, "ping", "-n", "-c", "1", "-W", pingTimeoutSeconds(observationTimeout), "--", target.Address).CombinedOutput()
-		elapsedMS := float64(time.Since(start).Microseconds()) / 1000
-		cancel()
-		if err != nil {
-			samples = append(samples, failedMeasuredLocalProbeSample(seq, elapsedMS, classifyProbeError(err)))
-			continue
+		pingAddr := candidates[(seq-1)%len(candidates)]
+		sample, ok := executeSingleLocalPing(ctx, seq, pingAddr, timeout, observationTimeout)
+		if !ok && !familyLocked {
+			if alt, found := otherAddressFamilyCandidates(resolved, pingAddr.Is6()); found {
+				altSample, altOK := executeSingleLocalPing(ctx, seq, alt[0], timeout, observationTimeout)
+				if altOK {
+					candidates = alt
+					familyLocked = true
+					samples = append(samples, altSample)
+					continue
+				}
+			}
+		} else if ok && !familyLocked {
+			candidates = sameAddressFamilyCandidates(resolved, pingAddr.Is6())
+			familyLocked = true
 		}
-		latency := parsePingLatencyMS(string(output))
-		if latency == nil {
-			latencyValue := cappedLocalDrawableLatencyMS(elapsedMS)
-			latency = &latencyValue
-		}
-		if time.Duration(*latency*float64(time.Millisecond)) > timeout {
-			samples = append(samples, probe.Sample{Seq: seq, Success: false, Error: "timeout"})
-			continue
-		}
-		capped := cappedLocalDrawableLatencyMS(*latency)
-		samples = append(samples, probe.Sample{Seq: seq, Success: true, LatencyMS: &capped})
+		samples = append(samples, sample)
 	}
 	return samples, nil
+}
+
+func sameAddressFamilyCandidates(addrs []netip.Addr, wantIPv6 bool) []netip.Addr {
+	filtered := make([]netip.Addr, 0, len(addrs))
+	for _, addr := range addrs {
+		if addr.Is6() == wantIPv6 {
+			filtered = append(filtered, addr)
+		}
+	}
+	return filtered
+}
+
+func otherAddressFamilyCandidates(addrs []netip.Addr, currentIPv6 bool) ([]netip.Addr, bool) {
+	filtered := sameAddressFamilyCandidates(addrs, !currentIPv6)
+	return filtered, len(filtered) > 0
+}
+
+func executeSingleLocalPing(ctx context.Context, seq int, pingAddr netip.Addr, timeout, observationTimeout time.Duration) (probe.Sample, bool) {
+	pingCtx, cancel := context.WithTimeout(ctx, observationTimeout)
+	start := time.Now()
+	output, err := localPingExecCommand(pingCtx, pingAddr.String(), pingAddr.Is6(), observationTimeout)
+	elapsedMS := float64(time.Since(start).Microseconds()) / 1000
+	cancel()
+	if err != nil {
+		return failedMeasuredLocalProbeSample(seq, elapsedMS, classifyProbeError(err)), false
+	}
+	latency := parsePingLatencyMS(string(output))
+	if latency == nil {
+		latencyValue := cappedLocalDrawableLatencyMS(elapsedMS)
+		latency = &latencyValue
+	}
+	if time.Duration(*latency*float64(time.Millisecond)) > timeout {
+		return probe.Sample{Seq: seq, Success: false, Error: "timeout"}, false
+	}
+	capped := cappedLocalDrawableLatencyMS(*latency)
+	return probe.Sample{Seq: seq, Success: true, LatencyMS: &capped}, true
+}
+
+func resolveSafeLocalPingAddresses(ctx context.Context, rawHost string, timeout time.Duration) ([]netip.Addr, error) {
+	host := strings.TrimSpace(strings.Trim(rawHost, "[]"))
+	if host == "" || strings.HasPrefix(host, "-") {
+		return nil, errInvalidLocalPingTarget
+	}
+	if literal, err := netip.ParseAddr(host); err == nil {
+		literal = literal.Unmap()
+		if isUnsafeLocalPingAddr(literal) {
+			return nil, errUnsafeLocalPingTarget
+		}
+		return []netip.Addr{literal}, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	addrs, err := localPingLookupNetIP(lookupCtx, host)
+	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
+		return nil, fmt.Errorf("%w: %v", errLocalPingDNS, err)
+	}
+	if len(addrs) == 0 {
+		return nil, errLocalPingDNS
+	}
+	seen := make(map[netip.Addr]struct{}, len(addrs))
+	safe := make([]netip.Addr, 0, len(addrs))
+	for _, addr := range addrs {
+		addr = addr.Unmap()
+		if isUnsafeLocalPingAddr(addr) {
+			return nil, errUnsafeLocalPingTarget
+		}
+		if _, exists := seen[addr]; exists {
+			continue
+		}
+		seen[addr] = struct{}{}
+		safe = append(safe, addr)
+	}
+	return safe, nil
+}
+
+func isUnsafeLocalPingAddr(addr netip.Addr) bool {
+	if !addr.IsValid() {
+		return true
+	}
+	addr = addr.Unmap()
+	if addr.IsLoopback() ||
+		addr.IsPrivate() ||
+		addr.IsUnspecified() ||
+		addr.IsLinkLocalUnicast() ||
+		addr.IsLinkLocalMulticast() ||
+		addr.IsMulticast() {
+		return true
+	}
+	for _, prefix := range unsafeLocalPingPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultLocalPingExecCommand(ctx context.Context, ipLiteral string, ipv6 bool, timeout time.Duration) ([]byte, error) {
+	if runtime.GOOS == "darwin" {
+		if ipv6 {
+			return exec.CommandContext(ctx, "ping6", "-n", "-c", "1", "--", ipLiteral).CombinedOutput()
+		}
+		ms := int(math.Ceil(float64(timeout) / float64(time.Millisecond)))
+		if ms < 1 {
+			ms = 1
+		}
+		return exec.CommandContext(ctx, "ping", "-n", "-c", "1", "-W", strconv.Itoa(ms), "--", ipLiteral).CombinedOutput()
+	}
+	args := []string{"-n", "-c", "1", "-W", pingTimeoutSeconds(timeout)}
+	if ipv6 {
+		args = append([]string{"-6"}, args...)
+	}
+	args = append(args, "--", ipLiteral)
+	return exec.CommandContext(ctx, "ping", args...).CombinedOutput()
 }
 
 func pingTimeoutSeconds(timeout time.Duration) string {
@@ -395,7 +553,7 @@ func classifyProbeError(err error) string {
 	if strings.Contains(message, "timeout") || strings.Contains(message, "deadline") || strings.Contains(message, "i/o timeout") {
 		return "timeout"
 	}
-	if strings.Contains(message, "no such host") {
+	if strings.Contains(message, "no such host") || errors.Is(err, errLocalPingDNS) {
 		return "dns_error"
 	}
 	return "connect_error"

@@ -1,10 +1,13 @@
-import { useEffect, useRef, type ReactNode } from 'react'
-import type { HomeCardNode, HourlyLatencyPoint, NodeStatus, ServerCardTheme } from '../types'
+import { memo, useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
+import type { HomeCardNode, HourlyLatencyPoint, ServerCardTheme } from '../types'
 import { formatLatency } from '../lib/format'
 import { convertCurrencyAmount, formatCurrencyAmount, normalizeCurrencyCode, normalizeCurrencyRates, type CurrencyCode, type CurrencyRates } from '../lib/currency'
 import { ServerFlag } from './ServerFlag'
+import { expiryBadge, isOfflineStatus } from '../lib/nodeHealth'
 
-interface ServerCardProps {
+export { expiryBadge, formatLatency, isOfflineStatus, normalizeCurrencyRates, ServerFlag }
+
+export interface ServerCardProps {
   node: HomeCardNode
   serverCardTheme?: ServerCardTheme
   displayCurrency?: CurrencyCode
@@ -17,22 +20,25 @@ const osAsset: Record<string, string> = {
   debian: '/assets/logo/os-debian.svg',
   ubuntu: '/assets/logo/os-ubuntu.svg',
   windows: '/assets/logo/os-windows.svg',
+  darwin: '/assets/logo/os-macos.svg',
   centos: '/assets/logo/linux.svg',
   alpine: '/assets/logo/linux.svg',
   linux: '/assets/logo/linux.svg',
   unknown: '/assets/logo/linux.svg',
 }
 
-function osKindFor(os: string | undefined): string {
+export function osKindFor(os: string | undefined): string {
   const value = os?.trim().toLowerCase() ?? ''
+  if (value.includes('darwin') || value.includes('macos') || value.includes('mac os')) return 'darwin'
   for (const kind of ['windows', 'debian', 'ubuntu', 'centos', 'alpine', 'linux']) {
     if (value.includes(kind)) return kind
   }
   return 'unknown'
 }
 
-function osAssetFor(os: string | undefined): string {
+export function osAssetFor(os: string | undefined): string {
   const value = os?.trim().toLowerCase() ?? ''
+  if (value.includes('darwin') || value.includes('macos') || value.includes('mac os')) return osAsset.darwin
   if (value.includes('windows')) return osAsset.windows
   if (value.includes('debian')) return osAsset.debian
   if (value.includes('ubuntu')) return osAsset.ubuntu
@@ -42,24 +48,24 @@ function osAssetFor(os: string | undefined): string {
   return osAsset.unknown
 }
 
-function ratio(used: number | null | undefined, total: number | null | undefined): number | null {
+export function ratio(used: number | null | undefined, total: number | null | undefined): number | null {
   if (used === null || used === undefined || total === null || total === undefined || total <= 0) return null
   return (used / total) * 100
 }
 
-function clampPercent(value: number | null | undefined): number {
+export function clampPercent(value: number | null | undefined): number {
   if (value === null || value === undefined || !Number.isFinite(value)) return 0
   return Math.max(0, Math.min(100, value))
 }
 
-function barTone(value: number | null | undefined): 'good' | 'warning' | 'danger' | 'empty' {
+export function barTone(value: number | null | undefined): 'good' | 'warning' | 'danger' | 'empty' {
   if (value === null || value === undefined) return 'empty'
   if (value > 90) return 'danger'
   if (value > 60) return 'warning'
   return 'good'
 }
 
-function formatKulinBytes(value: number | null | undefined, options: { total?: boolean } = {}): string {
+export function formatKulinBytes(value: number | null | undefined, options: { total?: boolean } = {}): string {
   if (value === null || value === undefined) return '--'
   if (value === 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
@@ -76,7 +82,7 @@ function formatKulinBytes(value: number | null | undefined, options: { total?: b
   return `${options.total ? amount.replace(/\.00$/, '') : amount} ${units[unit]}`
 }
 
-function formatRate(value: number | null | undefined): string {
+export function formatRate(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   return `${formatKulinBytes(value)}/s`
 }
@@ -86,7 +92,7 @@ function formatCores(value: number | null | undefined): string {
   return `${value.toFixed(value % 1 === 0 ? 0 : 1)} ${value === 1 ? 'Core' : 'Cores'}`
 }
 
-function formatUsage(value: number | null | undefined): string {
+export function formatUsage(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   return value.toFixed(2)
 }
@@ -96,16 +102,12 @@ function formatLoad(value: number | null | undefined): string {
   return value.toFixed(2)
 }
 
-function formatOnlineDays(uptimeSeconds: number | null | undefined): string {
+export function formatOnlineDays(uptimeSeconds: number | null | undefined): string {
   if (uptimeSeconds === null || uptimeSeconds === undefined || !Number.isFinite(uptimeSeconds) || uptimeSeconds < 0) return '在线 -- 天'
   return `在线 ${Math.floor(uptimeSeconds / 86400)} 天`
 }
 
-function isOfflineStatus(status: NodeStatus | null | undefined): boolean {
-  return status === 'offline' || status === 'no_data'
-}
-
-function normalizeLoss(value: number | null | undefined): string {
+export function normalizeLoss(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   return `${value.toFixed(2)}%`
 }
@@ -113,7 +115,7 @@ function normalizeLoss(value: number | null | undefined): string {
 type HistoryKind = 'latency' | 'loss'
 type HistoryTone = 'good' | 'warning' | 'danger' | 'empty'
 
-function normalizeHourlyHistory(history: HourlyLatencyPoint[] | null | undefined): HourlyLatencyPoint[] {
+export function normalizeHourlyHistory(history: HourlyLatencyPoint[] | null | undefined): HourlyLatencyPoint[] {
   const values = (history ?? []).slice(-12)
   return [
     ...Array.from({ length: Math.max(0, 12 - values.length) }, () => ({ startedAt: '', latencyMs: null, lossPercent: null })),
@@ -121,7 +123,7 @@ function normalizeHourlyHistory(history: HourlyLatencyPoint[] | null | undefined
   ]
 }
 
-function historyTone(kind: HistoryKind, value: number | null | undefined): HistoryTone {
+export function historyTone(kind: HistoryKind, value: number | null | undefined): HistoryTone {
   if (value === null || value === undefined || !Number.isFinite(value)) return 'empty'
   if (kind === 'latency') {
     if (value < 0) return 'empty'
@@ -137,10 +139,11 @@ function historyTone(kind: HistoryKind, value: number | null | undefined): Histo
 function historyTimestamp(value: string): string {
   const parsed = new Date(value)
   if (value.trim() === '' || Number.isNaN(parsed.getTime())) return '暂无数据'
-  return parsed.toISOString().slice(0, 13).replace('T', ' ') + ':00'
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:00`
 }
 
-function historyTitle(kind: HistoryKind, point: HourlyLatencyPoint): string {
+export function historyTitle(kind: HistoryKind, point: HourlyLatencyPoint): string {
   const value = kind === 'latency' ? point.latencyMs : point.lossPercent
   const label = kind === 'latency' ? '延迟' : '丢包'
   const suffix = kind === 'latency' ? 'ms' : '%'
@@ -149,7 +152,7 @@ function historyTitle(kind: HistoryKind, point: HourlyLatencyPoint): string {
   return `${historyTimestamp(point.startedAt)} · ${label} ${value.toFixed(2)}${separator}${suffix}`
 }
 
-function historyStripSummary(kind: HistoryKind, label: string, points: HourlyLatencyPoint[]): string {
+export function historyStripSummary(kind: HistoryKind, label: string, points: HourlyLatencyPoint[]): string {
   const values = points.map((point) => kind === 'latency' ? point.latencyMs : point.lossPercent)
   const counts = { good: 0, warning: 0, danger: 0, empty: 0 }
   values.forEach((value) => { counts[historyTone(kind, value)] += 1 })
@@ -160,37 +163,12 @@ function formatTrafficLabel(): string {
   return '流量'
 }
 
-function expiryBadge(expiryLabel: string | null | undefined): { text: string; tone: 'safe' | 'soon' | 'urgent' | 'expired' } | null {
-  const trimmed = (expiryLabel ?? '').trim()
-  if (trimmed === '') return null
-  if (trimmed === '已过期') return { text: trimmed, tone: 'expired' }
-  if (trimmed === '今天到期') return { text: '余 0 天', tone: 'urgent' }
-  const relativeMatch = /^余\s*(\d+)\s*天$/.exec(trimmed)
-  if (relativeMatch) {
-    const days = Number(relativeMatch[1])
-    if (days <= 7) return { text: `余 ${days} 天`, tone: 'urgent' }
-    if (days <= 30) return { text: `余 ${days} 天`, tone: 'soon' }
-    return { text: `余 ${days} 天`, tone: 'safe' }
-  }
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
-  if (!match) return trimmed === '永 久' || trimmed === '永久' ? { text: '永久', tone: 'safe' } : { text: trimmed, tone: 'safe' }
-  const expiry = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-  const now = new Date()
-  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
-  const days = Math.ceil((expiry - today) / 86400000)
-  if (days < 0) return { text: '已过期', tone: 'expired' }
-  if (days === 0) return { text: '余 0 天', tone: 'urgent' }
-  if (days <= 7) return { text: `余 ${days} 天`, tone: 'urgent' }
-  if (days <= 30) return { text: `余 ${days} 天`, tone: 'soon' }
-  return { text: `余 ${days} 天`, tone: 'safe' }
-}
-
-function expiryMetricValue(expiry: ReturnType<typeof expiryBadge>): string {
+export function expiryMetricValue(expiry: ReturnType<typeof expiryBadge>): string {
   if (!expiry) return '--'
   return expiry.text.replace(/^余\s*/, '')
 }
 
-function formatRenewalCost(amount: number | null | undefined, currency: string | null | undefined, cycle: string | null | undefined, displayCurrency: CurrencyCode, exchangeRates: CurrencyRates): string | null {
+export function formatRenewalCost(amount: number | null | undefined, currency: string | null | undefined, cycle: string | null | undefined, displayCurrency: CurrencyCode, exchangeRates: CurrencyRates): string | null {
   if (amount === null || amount === undefined || !Number.isFinite(amount) || amount <= 0) return null
   const sourceCurrency = normalizeCurrencyCode(currency)
   const converted = convertCurrencyAmount(amount, sourceCurrency, displayCurrency, exchangeRates)
@@ -200,7 +178,64 @@ function formatRenewalCost(amount: number | null | undefined, currency: string |
   return `${formatCurrencyAmount(shownAmount, shownCurrency, { spaced: true })}${cycleText ? ` / ${cycleText}` : ''}`
 }
 
-export function ServerCard({ node, serverCardTheme = 'classic', displayCurrency = 'CNY', exchangeRates: inputExchangeRates = { CNY: 1 }, onOpen, onIntent }: ServerCardProps) {
+function sameHourlyHistory(left?: HourlyLatencyPoint[], right?: HourlyLatencyPoint[]): boolean {
+  if (left === right) return true
+  if (!left || !right || left.length !== right.length) return false
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i].startedAt !== right[i].startedAt || left[i].latencyMs !== right[i].latencyMs || left[i].lossPercent !== right[i].lossPercent) {
+      return false
+    }
+  }
+  return true
+}
+
+function sameCurrencyRates(left?: CurrencyRates, right?: CurrencyRates): boolean {
+  if (left === right) return true
+  if (!left || !right) return false
+  const keys = Object.keys(left) as CurrencyCode[]
+  if (keys.length !== Object.keys(right).length) return false
+  return keys.every((key) => left[key] === right[key])
+}
+
+export function sameServerCardProps(prev: ServerCardProps, next: ServerCardProps): boolean {
+  if (prev.serverCardTheme !== next.serverCardTheme || prev.displayCurrency !== next.displayCurrency || prev.onOpen !== next.onOpen || prev.onIntent !== next.onIntent) {
+    return false
+  }
+  if (!sameCurrencyRates(prev.exchangeRates, next.exchangeRates)) return false
+  const a = prev.node
+  const b = next.node
+  if (a === b) return true
+  return (
+    a.id === b.id &&
+    a.displayName === b.displayName &&
+    a.status === b.status &&
+    a.os === b.os &&
+    a.countryCode === b.countryCode &&
+    a.cpuCores === b.cpuCores &&
+    a.cpuPercent === b.cpuPercent &&
+    a.load1 === b.load1 &&
+    a.load5 === b.load5 &&
+    a.load15 === b.load15 &&
+    a.memoryUsedBytes === b.memoryUsedBytes &&
+    a.memoryTotalBytes === b.memoryTotalBytes &&
+    a.diskUsedBytes === b.diskUsedBytes &&
+    a.diskTotalBytes === b.diskTotalBytes &&
+    a.monthlyBillableBytes === b.monthlyBillableBytes &&
+    a.monthlyQuotaBytes === b.monthlyQuotaBytes &&
+    a.netInSpeedBps === b.netInSpeedBps &&
+    a.netOutSpeedBps === b.netOutSpeedBps &&
+    a.uptimeSeconds === b.uptimeSeconds &&
+    a.expiryLabel === b.expiryLabel &&
+    a.renewalAmount === b.renewalAmount &&
+    a.renewalCurrency === b.renewalCurrency &&
+    a.billingCycle === b.billingCycle &&
+    a.latencySummary?.avgMs === b.latencySummary?.avgMs &&
+    a.latencySummary?.lossPercent === b.latencySummary?.lossPercent &&
+    sameHourlyHistory(a.latencySummary?.hourlyHistory, b.latencySummary?.hourlyHistory)
+  )
+}
+
+export const ServerCard = memo(function ServerCard({ node, serverCardTheme = 'classic', displayCurrency = 'CNY', exchangeRates: inputExchangeRates = { CNY: 1 }, onOpen, onIntent }: ServerCardProps) {
   const memoryPercent = ratio(node.memoryUsedBytes, node.memoryTotalBytes)
   const diskPercent = ratio(node.diskUsedBytes, node.diskTotalBytes)
   const trafficPercent = ratio(node.monthlyBillableBytes, node.monthlyQuotaBytes)
@@ -212,48 +247,15 @@ export function ServerCard({ node, serverCardTheme = 'classic', displayCurrency 
   const isOfflineCard = isOfflineStatus(node.status)
   const capsule = serverCardTheme === 'capsule'
   const capsuleStatus = isOfflineCard ? 'status-offline' : node.status === 'warning' ? 'status-warning' : 'status-online'
-  const intentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const open = () => onOpen?.(node.id)
-  const clearIntentTimer = () => {
-    if (intentTimerRef.current === null) return
-    clearTimeout(intentTimerRef.current)
-    intentTimerRef.current = null
-  }
-  const runIntent = () => {
-    clearIntentTimer()
-    onIntent?.(node.id)
-  }
-  const scheduleIntent = () => {
-    if (!onIntent || intentTimerRef.current !== null) return
-    intentTimerRef.current = setTimeout(() => {
-      intentTimerRef.current = null
-      onIntent(node.id)
-    }, 120)
-  }
-
-  useEffect(() => clearIntentTimer, [])
+  const openHandlers = useNodeOpenHandlers(node.id, onOpen, onIntent)
 
   return (
     <div
       className={`kulin-node-card${capsule ? ` is-capsule ${capsuleStatus}` : ''}${isOfflineCard ? ' is-offline' : ''}`}
-      role={onOpen ? 'link' : undefined}
-      tabIndex={onOpen ? 0 : undefined}
-      onPointerEnter={scheduleIntent}
-      onPointerLeave={clearIntentTimer}
-      onPointerDown={runIntent}
-      onFocus={runIntent}
-      onBlur={clearIntentTimer}
-      onClick={open}
-      onKeyDown={(event) => {
-        if (!onOpen) return
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          open()
-        }
-      }}
+      {...openHandlers}
     >
       <section className="node-head">
-        <img alt={node.os || 'linux'} className="node-os" data-os={osKindFor(node.os)} loading="lazy" src={osAssetFor(node.os)} />
+        <img alt={node.os || 'linux'} className="node-os" data-os={osKindFor(node.os)} src={osAssetFor(node.os)} />
         <div className="node-title-line">
           <ServerFlag countryCode={node.countryCode} className="node-flag" />
           <p>{node.displayName}</p>
@@ -285,7 +287,7 @@ export function ServerCard({ node, serverCardTheme = 'classic', displayCurrency 
         <section className="node-footer-grid" aria-label={`${node.displayName} network, billing, and health`}>
           <Metric tone="up" icon={<UploadIcon />} label="上传" value={formatRate(node.netOutSpeedBps)} />
           <Metric tone="down" icon={<DownloadIcon />} label="下载" value={formatRate(node.netInSpeedBps)} />
-          <Metric tone="expiry" stateTone={expiry?.tone} icon={<CalendarIcon />} label="剩余" value={expiryMetricValue(expiry)} />
+          <Metric tone="expiry" icon={<CalendarIcon />} label="剩余" value={expiryMetricValue(expiry)} />
           <Metric tone="billing" icon={<WalletIcon />} label="账单" value={renewalCost ?? '--'} />
           <HealthHistoryRow kind="latency" icon={<ActivityIcon />} label="延迟" value={formatLatency(latency?.avgMs)} points={hourlyHistory} />
           <HealthHistoryRow kind="loss" icon={<TriangleAlertIcon />} label="丢包率" value={latency ? normalizeLoss(latency.lossPercent) : '--'} points={hourlyHistory} />
@@ -293,12 +295,53 @@ export function ServerCard({ node, serverCardTheme = 'classic', displayCurrency 
       </section>
     </div>
   )
+}, sameServerCardProps)
+
+
+/** Shared open/prefetch behaviour for home cards and list rows. */
+export function useNodeOpenHandlers(nodeId: string, onOpen?: (nodeId: string) => void, onIntent?: (nodeId: string) => void) {
+  const intentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const clearIntentTimer = () => {
+    if (intentTimerRef.current === null) return
+    clearTimeout(intentTimerRef.current)
+    intentTimerRef.current = null
+  }
+  useEffect(() => clearIntentTimer, [])
+  const open = () => onOpen?.(nodeId)
+  const runIntent = () => {
+    clearIntentTimer()
+    onIntent?.(nodeId)
+  }
+  return {
+    role: onOpen ? 'link' : undefined,
+    tabIndex: onOpen ? 0 : undefined,
+    onPointerEnter: () => {
+      if (!onIntent || intentTimerRef.current !== null) return
+      intentTimerRef.current = setTimeout(() => {
+        intentTimerRef.current = null
+        onIntent(nodeId)
+      }, 120)
+    },
+    onPointerLeave: clearIntentTimer,
+    onPointerDown: runIntent,
+    onFocus: runIntent,
+    onBlur: clearIntentTimer,
+    onClick: open,
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+      if (!onOpen) return
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        open()
+      }
+    },
+  }
 }
 
 type ResourceTone = 'cpu' | 'memory' | 'disk' | 'traffic'
 
 function UsageBar({ tone, label, valueText, percent, detail }: { tone: ResourceTone; label: string; valueText: string; percent: number | null | undefined; detail?: string }) {
   const value = clampPercent(percent)
+  const fillPercent = value > 0 && value < 2.8 ? 2.8 : value
   return (
     <div className={`usage-row usage-row--${tone}`}>
       <div className="usage-row__meta">
@@ -308,7 +351,7 @@ function UsageBar({ tone, label, valueText, percent, detail }: { tone: ResourceT
         <strong>{valueText}</strong>
       </div>
       <div className="usage-track" role="progressbar" aria-label={`${label} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}>
-        <div className={`usage-fill is-${barTone(percent)}`} style={{ transform: `translateX(-${100 - value}%)` }} />
+        <div className={`usage-fill is-${barTone(percent)}`} style={{ transform: `translateX(-${100 - fillPercent}%)` }} />
       </div>
       {detail !== undefined && <span className="usage-row__detail">{detail}</span>}
     </div>
@@ -316,7 +359,6 @@ function UsageBar({ tone, label, valueText, percent, detail }: { tone: ResourceT
 }
 
 type MetricTone = 'up' | 'down' | 'expiry' | 'billing'
-type ExpiryTone = 'safe' | 'soon' | 'urgent' | 'expired'
 
 function HealthHistoryRow({ kind, icon, label, value, points }: { kind: HistoryKind; icon: ReactNode; label: string; value: string; points: HourlyLatencyPoint[] }) {
   return (
@@ -344,9 +386,9 @@ function HealthHistoryRow({ kind, icon, label, value, points }: { kind: HistoryK
   )
 }
 
-function Metric({ tone, stateTone, icon, label, value }: { tone: MetricTone; stateTone?: ExpiryTone; icon: ReactNode; label: string; value: string }) {
+function Metric({ tone, icon, label, value }: { tone: MetricTone; icon: ReactNode; label: string; value: string }) {
   return (
-    <div className={`node-metric metric-${tone}${stateTone ? ` is-${stateTone}` : ''}`}>
+    <div className={`node-metric metric-${tone}`}>
       <span className="metric-heading">
         <span className="metric-icon">{icon}</span>
         <span className="metric-label">{label}</span>

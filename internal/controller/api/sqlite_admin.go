@@ -7,8 +7,15 @@ import (
 	"time"
 )
 
+func (s *sqliteAdminDomain) queryReadDB() *sql.DB {
+	if s.readDB != nil {
+		return s.readDB
+	}
+	return s.db
+}
+
 func (s *sqliteAdminDomain) AdminNodes(ctx context.Context) ([]AdminNode, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.queryReadDB().QueryContext(ctx, `
 		SELECT n.id, n.display_name, n.status, n.country_code, n.region, n.disabled,
 		       n.home_probe_target_id, n.billing_mode, n.monthly_reset_day, n.expiry_date, n.expiry_permanent, n.billing_cycle, n.renewal_amount, n.renewal_currency, n.display_order, n.public_ipv4, n.public_ipv6,
 		       n.monthly_quota_bytes, n.last_seen_at, n.created_at, n.updated_at,
@@ -112,7 +119,7 @@ func (s *sqliteAdminDomain) AdminNodes(ctx context.Context) ([]AdminNode, error)
 }
 
 func (s *sqliteAdminDomain) AdminProbeTargets(ctx context.Context) ([]AdminProbeTarget, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.queryReadDB().QueryContext(ctx, `
 		SELECT pt.id, pt.name, pt.type, pt.address, pt.port, pt.count, pt.timeout_ms, pt.interval_sec, pt.display_order,
 		       n.id, n.display_name, npt.enabled
 		FROM probe_targets pt

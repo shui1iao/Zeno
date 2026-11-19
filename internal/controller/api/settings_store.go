@@ -34,15 +34,23 @@ const (
 var errAdminSettingsConflict = errors.New("admin settings conflict")
 
 type sqliteSettings struct {
-	db *sql.DB
+	db     *sql.DB
+	readDB *sql.DB
+}
+
+func (s *sqliteSettings) queryReadDB() *sql.DB {
+	if s.readDB != nil {
+		return s.readDB
+	}
+	return s.db
 }
 
 func (s *sqliteSettings) PublicSettings(ctx context.Context) (SiteSettings, error) {
-	return s.siteSettings(ctx)
+	return s.siteSettingsFromDB(ctx, s.queryReadDB())
 }
 
 func (s *sqliteSettings) AdminSettings(ctx context.Context) (SiteSettings, error) {
-	return s.siteSettings(ctx)
+	return s.siteSettingsFromDB(ctx, s.queryReadDB())
 }
 
 func (s *sqliteSettings) UpdateAdminSettings(ctx context.Context, update AdminSettingsUpdateRequest) (SiteSettings, error) {
@@ -115,11 +123,15 @@ func settingsRevisionTx(ctx context.Context, tx *sql.Tx) (int64, error) {
 }
 
 func (s *sqliteSettings) siteSettings(ctx context.Context) (SiteSettings, error) {
+	return s.siteSettingsFromDB(ctx, s.db)
+}
+
+func (s *sqliteSettings) siteSettingsFromDB(ctx context.Context, targetDB *sql.DB) (SiteSettings, error) {
 	settings := defaultSiteSettings()
 	bindings := siteSettingsBindings()
 	query, args := siteSettingsQuery(bindings)
 	decoder := newSettingsDecoder(bindings)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := targetDB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return SiteSettings{}, err
 	}

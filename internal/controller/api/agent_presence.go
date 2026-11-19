@@ -190,24 +190,45 @@ type staleAgentOfflineStore interface {
 	RecordStaleAgentOfflineTransition(ctx context.Context, nodeID string, now time.Time) (notificationStatusTransition, bool, error)
 }
 
+const DefaultStartupOfflineGrace = 3 * time.Minute
+
+func (h *handler) inStartupOfflineGrace(now time.Time) bool {
+	if h == nil || h.startupOfflineGrace <= 0 || h.startedAt.IsZero() {
+		return false
+	}
+	elapsed := now.Sub(h.startedAt)
+	return elapsed >= 0 && elapsed < h.startupOfflineGrace
+}
+
+func (h *handler) startupOfflineGraceRemaining(now time.Time) time.Duration {
+	if !h.inStartupOfflineGrace(now) {
+		return 0
+	}
+	return h.startupOfflineGrace - now.Sub(h.startedAt)
+}
+
 func (h *handler) runStaleAgentOfflineScanner(ctx context.Context, interval time.Duration) {
-	h.runStaleAgentOfflineScannerWithGrace(ctx, interval, nodeHeartbeatOfflineAfter)
+	h.runStaleAgentOfflineScannerWithGrace(ctx, interval, h.startupOfflineGrace)
 }
 
 func (h *handler) runStaleAgentOfflineScannerWithGrace(ctx context.Context, interval, startupGrace time.Duration) {
-	if h == nil || interval <= 0 || startupGrace <= 0 {
+	if h == nil || interval <= 0 {
 		return
 	}
-	// A freshly started Controller cannot distinguish an actually offline Agent
-	// from one that simply has not reconnected after the Controller restart yet.
-	// Give Agents one full liveness window before the first scan so deployments
-	// and short Controller outages do not immediately create false incidents.
-	startupTimer := time.NewTimer(startupGrace)
-	defer startupTimer.Stop()
-	select {
-	case <-ctx.Done():
-		return
-	case <-startupTimer.C:
+	if startupGrace > 0 {
+		// A freshly started Controller cannot distinguish an actually offline Agent
+		// from one that simply has not reconnected after the Controller restart yet.
+		// Give Agents one full liveness window before the first scan so deployments
+		// and short Controller outages do not immediately create false incidents.
+		startupTimer := time.NewTimer(startupGrace)
+		defer startupTimer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-startupTimer.C:
+			h.dispatchStaleAgentOfflineChecks(ctx)
+		}
+	} else {
 		h.dispatchStaleAgentOfflineChecks(ctx)
 	}
 	ticker := time.NewTicker(interval)
@@ -339,7 +360,11 @@ func (h *handler) handleAgentPresenceWebSocket(w http.ResponseWriter, r *http.Re
 }
 
 func (h *handler) scheduleAgentPresenceOfflineCheck(store agentStore, nodeID string) {
-	h.scheduleAgentPresenceOfflineCheckAfter(store, nodeID, nodeHeartbeatOfflineAfter)
+	delay := nodeHeartbeatOfflineAfter
+	if remaining := h.startupOfflineGraceRemaining(h.notificationNow()); remaining > delay {
+		delay = remaining
+	}
+	h.scheduleAgentPresenceOfflineCheckAfter(store, nodeID, delay)
 }
 
 func (h *handler) scheduleAgentPresenceOfflineCheckAfter(store agentStore, nodeID string, delay time.Duration) {

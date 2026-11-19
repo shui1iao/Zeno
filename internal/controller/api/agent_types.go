@@ -1,8 +1,18 @@
 package api
 
+import "encoding/json"
+
 type AgentProbeTargetsResponse struct {
 	Targets []AgentProbeTarget `json:"targets"`
 	Version int64              `json:"version"`
+}
+
+func (response AgentProbeTargetsResponse) MarshalJSON() ([]byte, error) {
+	type alias AgentProbeTargetsResponse
+	if response.Targets == nil {
+		response.Targets = []AgentProbeTarget{}
+	}
+	return json.Marshal(alias(response))
 }
 
 type AgentProbeTarget struct {

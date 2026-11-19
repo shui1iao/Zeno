@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/url"
 	"strconv"
 	"strings"
@@ -8,6 +9,14 @@ import (
 
 type AdminProbeTargetsResponse struct {
 	Targets []AdminProbeTarget `json:"targets"`
+}
+
+func (response AdminProbeTargetsResponse) MarshalJSON() ([]byte, error) {
+	type alias AdminProbeTargetsResponse
+	if response.Targets == nil {
+		response.Targets = []AdminProbeTarget{}
+	}
+	return json.Marshal(alias(response))
 }
 
 // AdminProbeTargetReorderRequest carries the complete visible target order so
@@ -221,6 +230,14 @@ type AdminProbeTarget struct {
 	IntervalSec  int                          `json:"interval_sec"`
 	DisplayOrder int                          `json:"display_order"`
 	Assignments  []AdminProbeTargetAssignment `json:"assignments"`
+}
+
+func (target AdminProbeTarget) MarshalJSON() ([]byte, error) {
+	type alias AdminProbeTarget
+	if target.Assignments == nil {
+		target.Assignments = []AdminProbeTargetAssignment{}
+	}
+	return json.Marshal(alias(target))
 }
 
 type AdminProbeTargetAssignment struct {

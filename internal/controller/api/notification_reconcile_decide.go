@@ -107,8 +107,9 @@ type notificationDecisionInput struct {
 	// Detail is the active resource rule names for a resource warning.
 	Detail string
 	// LastSeenAt is the liveness incident start when the node is offline.
-	LastSeenAt  int64
-	HoldSeconds int64
+	LastSeenAt   int64
+	HoldSeconds  int64
+	StartupGrace bool
 }
 
 type notificationDecision struct {
@@ -161,6 +162,13 @@ func compareNotificationState(in notificationDecisionInput, row notificationStat
 		next.NotifiedDetail = ""
 		next.IncidentFrom = 0
 		return notificationDecision{Action: notificationActionSilentUpdate, Next: next, Changed: true}
+	}
+	if in.StartupGrace &&
+		in.Kind == notificationKindLiveness &&
+		in.Actual == livenessStateOffline &&
+		row.Notified != livenessStateOffline &&
+		row.PendingTarget != livenessStateOffline {
+		return notificationDecision{Action: notificationActionWait, Next: row}
 	}
 	next := row
 	changed := false

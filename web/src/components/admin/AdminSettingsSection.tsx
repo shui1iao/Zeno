@@ -1,11 +1,10 @@
 import { type CSSProperties, type FormEvent, useEffect, useState } from 'react'
 import { AdminSettingsConflictError, type AdminSettingsUpdateInput } from '../../api/adminClient'
-import { appearancePresetOptions, appearancePresets, appearanceValuesForSettings, shellStyleForSettings, themeOptions, type AppearanceValues } from '../../lib/appearance'
+import { appearancePresetOptions, appearancePresets, appearanceValuesForSettings, resolvedTheme, shellStyleForSettings, themeOptions, type AppearanceValues } from '../../lib/appearance'
 import { validateAdminSettingsInput } from '../../lib/adminSettings'
 import { runMaybePromise, type MaybePromise } from '../../lib/maybePromise'
 import type { AdminSettings, AppearancePreset, ServerCardTheme } from '../../types'
 import { SlidingSelector } from '../SlidingSelector'
-import { AdminSegmentedField } from './AdminFields'
 import { AdminFormSection, AdminActionFooter, AdminWorkspaceHeading } from './AdminPrimitives'
 
 export interface AdminSettingsSectionProps {
@@ -172,7 +171,7 @@ export default function AdminSettingsSection({ settings, onUpdate }: AdminSettin
           </section>
           <AdminFormSection className="admin-settings-card-section admin-settings-appearance-card" title="界面外观">
             <div className="admin-form-grid">
-              <AdminSegmentedField name="theme" label="主题" value={previewTheme} options={themeOptions} onChange={(value) => updateDraft({ theme: value === 'light' || value === 'dark' ? value : 'system' })} />
+              <AdminThemeModeSelector value={previewTheme} onChange={(theme) => updateDraft({ theme })} />
               <AdminCardThemeSelector value={draft.serverCardTheme} onChange={(serverCardTheme) => updateDraft({ serverCardTheme })} />
               <label><span>电脑端背景图 URL</span><input name="desktop-background-url" autoComplete="off" value={draft.desktopBackgroundUrl} onChange={(event) => updateDraft({ desktopBackgroundUrl: event.currentTarget.value })} placeholder="可留空" /></label>
               <label><span>手机端背景图 URL</span><input name="mobile-background-url" autoComplete="off" value={draft.mobileBackgroundUrl} onChange={(event) => updateDraft({ mobileBackgroundUrl: event.currentTarget.value })} placeholder="可留空，默认跟随电脑端" /></label>
@@ -198,7 +197,7 @@ export default function AdminSettingsSection({ settings, onUpdate }: AdminSettin
                   <AdminStyleRangeField name="background-overlay" label="背景遮罩" value={appearance.backgroundOverlay} min={0} max={0.8} step={0.01} onChange={(value) => updateAppearance({ backgroundOverlay: value })} formatValue={(value) => `${Math.round(value * 100)}%`} />
                 </div>
               </div>
-              <AdminAppearancePreview appearance={appearance} settings={settings} theme={previewTheme} />
+              <AdminAppearancePreview appearance={appearance} draft={draft} settings={settings} theme={previewTheme} />
             </div>
             {serverConflict && <p className="admin-inline-note is-error" role="alert">检测到服务端设置已更新。<button type="button" onClick={loadLatestSettings}>载入最新设置</button></p>}
             {settingsError && <p className="admin-install-error">{settingsError}</p>}
@@ -207,6 +206,26 @@ export default function AdminSettingsSection({ settings, onUpdate }: AdminSettin
         </div>
       </form>
     </section>
+  )
+}
+
+function AdminThemeModeSelector({ value, onChange }: { value: AdminSettings['theme']; onChange: (value: AdminSettings['theme']) => void }) {
+  return (
+    <div className="admin-appearance-preset-field admin-theme-mode-field">
+      <span>主题</span>
+      <input type="hidden" name="theme" value={value} />
+      <SlidingSelector
+        ariaLabel="站点主题"
+        role="group"
+        className="admin-theme-mode-slider sliding-selector--medium"
+        options={themeOptions.map((option) => ({
+          value: option.value,
+          content: <span className="admin-appearance-preset-option"><strong>{option.label}</strong></span>,
+        }))}
+        value={value}
+        onChange={(nextValue) => onChange(nextValue === 'light' || nextValue === 'dark' ? nextValue : 'system')}
+      />
+    </div>
   )
 }
 
@@ -256,33 +275,60 @@ function AdminAppearancePresetSlider({ value, onChange }: { value: AppearancePre
   )
 }
 
-function AdminAppearancePreview({ appearance, settings, theme }: { appearance: AppearanceValues; settings: AdminSettings; theme: AdminSettings['theme'] }) {
+function AdminAppearancePreview({ appearance, draft, settings, theme }: { appearance: AppearanceValues; draft: AdminSettingsDraft; settings: AdminSettings; theme: AdminSettings['theme'] }) {
   const previewShellStyle = shellStyleForSettings({
     ...settings,
     ...appearance,
+    siteTitle: draft.siteTitle,
     theme,
     backgroundUrl: 'preview',
     desktopBackgroundUrl: 'preview',
     mobileBackgroundUrl: '',
   }) as Record<string, string | number> | undefined
+  const isDarkPreview = resolvedTheme(theme) === 'dark'
+  const previewWallpaper = (draft.desktopBackgroundUrl || draft.mobileBackgroundUrl || '').trim()
+  const rawPreviewBorder = String(previewShellStyle?.['--border'] ?? appearance.themeColor)
+  const rawPreviewOverlay = String(previewShellStyle?.['--zeno-background-overlay-color'] ?? 'transparent')
   const previewStyle = {
     '--appearance-preview-color': String(previewShellStyle?.['--blue'] ?? appearance.themeColor),
     '--appearance-preview-radius': String(previewShellStyle?.['--radius-card'] ?? `${Math.max(10, appearance.cardRadius - 4)}px`),
     '--appearance-preview-surface': String(previewShellStyle?.['--page-surface'] ?? 'rgba(255, 255, 255, 0.7)'),
-    '--appearance-preview-border': String(previewShellStyle?.['--border'] ?? appearance.themeColor),
+    '--appearance-preview-border': isDarkPreview && appearance.borderStrength > 0 ? `color-mix(in srgb, ${rawPreviewBorder} 36%, rgba(203, 213, 225, 0.52))` : rawPreviewBorder,
     '--appearance-preview-shadow': String(previewShellStyle?.['--zeno-card-shadow'] ?? 'none'),
     '--appearance-preview-filter': String(previewShellStyle?.['--zeno-card-filter'] ?? (appearance.cardBlur > 0 ? `blur(${appearance.cardBlur}px) saturate(1.06)` : 'none')),
-    '--appearance-preview-overlay': String(previewShellStyle?.['--zeno-background-overlay-color'] ?? 'transparent'),
+    '--appearance-preview-overlay': isDarkPreview ? `color-mix(in srgb, ${rawPreviewOverlay} 65%, rgba(4, 10, 20, 0.72))` : rawPreviewOverlay,
     '--appearance-preview-foreground': String(previewShellStyle?.['--foreground'] ?? 'var(--foreground)'),
     '--appearance-preview-muted': String(previewShellStyle?.['--muted'] ?? 'var(--muted)'),
+    '--appearance-preview-image': previewWallpaper === '' ? "url('/assets/appearance-preview.webp')" : `url("${previewWallpaper.replaceAll('"', '%22')}")`,
   } as CSSProperties
   return (
-    <div className="admin-appearance-preview" style={previewStyle} aria-hidden="true">
-      <div className="admin-appearance-preview__card">
-        <span />
-        <strong>预览卡片</strong>
-        <em>{Math.round(appearance.cardOpacity * 100)}% · {appearance.cardBlur}px · {Math.round(appearance.borderStrength * 100)}%</em>
+    <div className={`admin-appearance-preview${isDarkPreview ? ' is-dark' : ''}`} style={previewStyle} aria-hidden="true">
+      <div className="admin-appearance-preview__bar">
+        <span className="admin-appearance-preview__logo" />
+        <strong>{draft.siteTitle.trim() || 'Zeno'}</strong>
+        <span className="admin-appearance-preview__dots"><i /><i /></span>
       </div>
+      <div className="admin-appearance-preview__card">
+        <div className="admin-appearance-preview__head">
+          <span className="admin-appearance-preview__flag" />
+          <strong>预览节点</strong>
+          <em>在线 33 天</em>
+        </div>
+        <div className="admin-appearance-preview__meters">
+          {[['CPU', 38, 'is-good'], ['内存', 72, 'is-warning'], ['存储', 19, 'is-good']].map(([label, value, tone]) => (
+            <div key={label} className="admin-appearance-preview__meter">
+              <span>{label}</span>
+              <i><b className={String(tone)} style={{ width: `${value}%` }} /></i>
+              <em>{value}%</em>
+            </div>
+          ))}
+        </div>
+        <div className="admin-appearance-preview__rates">
+          <span><i className="is-up" />上传 14.68 KB/s</span>
+          <span><i className="is-down" />下载 16.20 KB/s</span>
+        </div>
+      </div>
+      <span className="admin-appearance-preview__caption">实时预览 · {Math.round(appearance.cardOpacity * 100)}% · {appearance.cardBlur}px · 圆角 {appearance.cardRadius}px</span>
     </div>
   )
 }

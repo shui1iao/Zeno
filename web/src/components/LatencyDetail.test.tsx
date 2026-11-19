@@ -113,7 +113,7 @@ describe('LatencyDetail', () => {
     expect(html).toContain('detail-traffic-value')
     expect(html).toContain('总流量: ↑ 2.00 KB  ↓ 1.00 KB')
     expect(html).not.toContain('detail-info-card')
-    expect(html).toContain('系统资源趋势')
+    expect(html).toContain('<h3>系统资源</h3>')
     expect(html).not.toContain('实时 · 1 个状态采样')
     expect(html).not.toContain('个状态采样')
     expect(html).not.toContain('Example Node A 网络延迟')
@@ -265,5 +265,25 @@ describe('LatencyDetail', () => {
     expect(latencyRangeMarkup).not.toContain('30 天')
     expect(html).toContain('平')
     expect(html).not.toContain('削峰')
+  })
+
+  it('does not synthesize growing uptime or fake 0.00% packet loss for offline nodes with empty buckets', () => {
+    const html = renderToStaticMarkup(
+      <LatencyDetail
+        node={{ ...node, status: 'offline', uptimeSeconds: null, bootTime: '2026-07-02T01:00:00Z' }}
+        points={[{ ts: '2026-07-02T12:00:00Z', targetId: 'google', targetName: 'Google', medianMs: null, avgMs: null, lossPercent: 0 }]}
+        statePoints={[]}
+        range="1d"
+        onBack={vi.fn()}
+        onRangeChange={vi.fn()}
+      />,
+    )
+
+    expect(html).toContain('detail-status-pill status-offline')
+    expect(html).toContain('离线 · 上次启动')
+    expect(html).not.toContain('天 ')
+    expect(html).toContain('丢包 --')
+    expect(html).not.toContain('丢包 0.00%')
+    expect(html).toContain('暂无网络延迟历史')
   })
 })

@@ -1,10 +1,11 @@
-import { useCallback, useId, useRef, useState } from 'react'
+import { memo, useCallback, useId, useRef, useState, type CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
 import { DashboardHeader } from './DashboardHeader'
 import { ServerFlag } from './ServerFlag'
+import HomeStatusMatrix from './HomeStatusMatrix'
 import { availableCurrencyOptions, formatCurrencyAmount, normalizeCurrencyCode, normalizeCurrencyRates, type CurrencyCode, type CurrencyRates } from '../lib/currency'
 import { defaultSettings } from '../lib/appearance'
-import type { AdminSettings, AdminTheme } from '../types'
+import type { AdminSettings, AdminTheme, HomeCardNode } from '../types'
 import { OverlaySurface } from './OverlaySurface'
 import { useAnchoredPopover } from '../hooks/useAnchoredPopover'
 import { useAnchoredPopoverPosition } from '../hooks/useAnchoredPopoverPosition'
@@ -48,6 +49,9 @@ interface HomeOverviewPanelProps {
   totalDown: number
   upSpeed: number
   downSpeed: number
+  /** Ordered home nodes for the status matrix and the attention summary. */
+  nodes?: ReadonlyArray<HomeCardNode>
+  onOpenNode?: (nodeId: string) => void
 }
 
 interface HomeTopPanelProps extends HomeOverviewPanelProps {
@@ -80,7 +84,56 @@ export function HomeTopPanel({ settings = defaultSettings, onHome, onAdmin, onAd
   )
 }
 
-export function HomeRegionFilter({ regions, activeRegion, onChange }: { regions: string[]; activeRegion: string; onChange: (region: string) => void }) {
+export type HomeView = 'card' | 'list'
+
+export const homeViewStorageKey = 'zeno_home_view'
+
+export function storedHomeView(): HomeView {
+  // No window (SSR/tests) or blocked storage both land in the catch.
+  try {
+    return localStorage.getItem(homeViewStorageKey) === 'list' ? 'list' : 'card'
+  } catch {
+    return 'card'
+  }
+}
+
+export function rememberHomeView(view: HomeView): void {
+  try { localStorage.setItem(homeViewStorageKey, view) } catch { /* storage unavailable */ }
+}
+
+const homeViewOptions = [
+  { value: 'card' as const, label: '卡片视图', icon: <ViewGridIcon /> },
+  { value: 'list' as const, label: '列表视图', icon: <ViewListIcon /> },
+]
+
+/**
+ * Two fixed columns, so the shared sliding-selector look is driven purely by its
+ * CSS variables; the measuring SlidingSelector stays out of the initial bundle.
+ */
+function HomeViewToggle({ view, onChange }: { view: HomeView; onChange: (view: HomeView) => void }) {
+  const style = { '--slider-columns': 2, '--slider-grid-columns': 2, '--slider-row': 0, '--slider-width': 'calc(100% / 2)', '--slider-shift': view === 'list' ? '50%' : '0%' } as CSSProperties
+  return (
+    <div className="sliding-selector sliding-selector--compact home-view-toggle" role="group" aria-label="首页视图" style={style}>
+      {homeViewOptions.map((option) => (
+        <button key={option.value} type="button" data-active={option.value === view} data-value={option.value} aria-pressed={option.value === view} aria-label={option.label} title={option.label} onClick={() => onChange(option.value)}>
+          {option.icon}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+interface HomeRegionFilterProps {
+  regions: string[]
+  activeRegion: string
+  onChange: (region: string) => void
+  /** Server count per region code plus `ALL`. */
+  counts?: Readonly<Record<string, number>>
+  view?: HomeView
+  onViewChange?: (view: HomeView) => void
+}
+
+export const HomeRegionFilter = memo(function HomeRegionFilter({ regions, activeRegion, onChange, counts, view, onViewChange }: HomeRegionFilterProps) {
   const options = ['ALL', ...regions]
   return (
     <nav className="region-filter-bar" aria-label="服务器地区筛选">
@@ -97,10 +150,33 @@ export function HomeRegionFilter({ regions, activeRegion, onChange }: { regions:
             onClick={() => onChange(region)}
           >
             {region === 'ALL' ? <span className="region-all-text">全部</span> : <ServerFlag countryCode={region} />}
+            {counts?.[region] !== undefined && <span className="region-count">{counts[region]}</span>}
           </button>
         ))}
       </div>
+      {view && onViewChange && (
+        <HomeViewToggle view={view} onChange={onViewChange} />
+      )}
     </nav>
+  )
+})
+
+function ViewGridIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="4" y="4" width="7" height="7" rx="1.6" />
+      <rect x="13" y="4" width="7" height="7" rx="1.6" />
+      <rect x="4" y="13" width="7" height="7" rx="1.6" />
+      <rect x="13" y="13" width="7" height="7" rx="1.6" />
+    </svg>
+  )
+}
+
+function ViewListIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" />
+    </svg>
   )
 }
 
@@ -242,7 +318,7 @@ function HomeCurrencyMenu({ value, options, onChange }: HomeCurrencyMenuProps) {
   )
 }
 
-export function HomeOverviewPanel({ totalCount, onlineCount, monthlyCost, displayCurrency = 'CNY', totalUp, totalDown, upSpeed, downSpeed }: HomeOverviewPanelProps) {
+export const HomeOverviewPanel = memo(function HomeOverviewPanel({ totalCount, onlineCount, monthlyCost, displayCurrency = 'CNY', totalUp, totalDown, upSpeed, downSpeed, nodes, onOpenNode }: HomeOverviewPanelProps) {
   const uploadRate = compactRateParts(upSpeed)
   const downloadRate = compactRateParts(downSpeed)
   const activeCurrency = normalizeCurrencyCode(displayCurrency)
@@ -256,6 +332,7 @@ export function HomeOverviewPanel({ totalCount, onlineCount, monthlyCost, displa
         <div className="home-summary__metric-value home-summary__metric-value--status">
           <strong>{onlineCount}</strong>
           <span>/ {totalCount}</span>
+          {nodes && <HomeStatusMatrix nodes={nodes} onOpenNode={onOpenNode} />}
         </div>
       </div>
       <div className="home-summary__metric home-summary__metric--cost" aria-label="月均消费">
@@ -273,4 +350,4 @@ export function HomeOverviewPanel({ totalCount, onlineCount, monthlyCost, displa
       <HomeTrafficSummary direction="download" kind="rate" rate={downloadRate} total={totalBytesParts(totalDown)} />
     </section>
   )
-}
+})

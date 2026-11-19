@@ -497,6 +497,102 @@ func TestTrafficMonthlyEpochMigrationPreservesLegacyRows(t *testing.T) {
 	}
 }
 
+func TestBillingModeMaxUsesPeriodAggregateMaxAndHealsDriftedRows(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "zeno.db")
+	store, err := OpenSQLiteStore(databasePath)
+	if err != nil {
+		t.Fatalf("open sqlite store: %v", err)
+	}
+	ctx := context.Background()
+	if err := store.SeedPreviewData(ctx, PreviewSeedOptions{NodeID: "example-node-a", DisplayName: "Example Node A", AgentToken: "token"}); err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	modeMax := "max"
+	if _, err := store.UpdateAdminNode(ctx, "example-node-a", AdminNodeUpdateRequest{BillingMode: &modeMax}); err != nil {
+		t.Fatalf("set billing_mode=max: %v", err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	state := AgentStateRequest{
+		CPUPercent: 1, MemoryUsedBytes: 1, MemoryTotalBytes: 2,
+		DiskUsedBytes: 1, DiskTotalBytes: 2, UptimeSeconds: 1,
+	}
+	// Slice 0: baseline (1000, 1000)
+	// Slice 1: +300 in, +0 out -> cumulative (300, 0), max = 300
+	// Slice 2: +0 in, +400 out -> cumulative (300, 400), max = 400 (NOT 300+400=700!)
+	// Slice 3: +250 in, +50 out -> cumulative (550, 450), max = 550 (NOT 700+250=950!)
+	for idx, totals := range [][2]int64{
+		{1000, 1000},
+		{1300, 1000},
+		{1300, 1400},
+		{1550, 1450},
+	} {
+		state.TS = now.Add(time.Duration(idx) * 3 * time.Second).Unix()
+		state.NetInTotalBytes = totals[0]
+		state.NetOutTotalBytes = totals[1]
+		if err := store.InsertAgentState(ctx, "example-node-a", state); err != nil {
+			t.Fatalf("insert state %d: %v", idx, err)
+		}
+	}
+
+	var inBytes, outBytes, billable int64
+	if err := store.db.QueryRowContext(ctx, `
+		SELECT in_bytes, out_bytes, billable_bytes
+		FROM traffic_monthly
+		WHERE node_id = 'example-node-a' AND billing_mode = 'max'
+	`).Scan(&inBytes, &outBytes, &billable); err != nil {
+		t.Fatalf("query max row: %v", err)
+	}
+	if inBytes != 550 || outBytes != 450 || billable != 550 {
+		t.Fatalf("max row = in=%d out=%d billable=%d, want 550/450/550", inBytes, outBytes, billable)
+	}
+
+	// Simulate legacy drifted sum-of-slice-maxes on disk and verify startup self-healing.
+	if _, err := store.db.ExecContext(ctx, `
+		UPDATE traffic_monthly SET billable_bytes = 950 WHERE node_id = 'example-node-a' AND billing_mode = 'max'
+	`); err != nil {
+		t.Fatalf("inject drifted billable_bytes: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	reopened, err := OpenSQLiteStore(databasePath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer reopened.Close()
+
+	if err := reopened.db.QueryRowContext(ctx, `
+		SELECT in_bytes, out_bytes, billable_bytes
+		FROM traffic_monthly
+		WHERE node_id = 'example-node-a' AND billing_mode = 'max'
+	`).Scan(&inBytes, &outBytes, &billable); err != nil {
+		t.Fatalf("query healed row: %v", err)
+	}
+	if inBytes != 550 || outBytes != 450 || billable != 550 {
+		t.Fatalf("healed max row = in=%d out=%d billable=%d, want 550/450/550", inBytes, outBytes, billable)
+	}
+}
+
+func TestBillingPeriodFollowsCallerTimezoneAtMidnightWindow(t *testing.T) {
+	shanghai := time.FixedZone("Asia/Shanghai", 8*3600)
+	// 2026-11-15 00:30:00 +0800 is 2026-11-14 16:30:00 UTC.
+	// With resetDay=15, Shanghai local time has ALREADY entered the 2026-11 period,
+	// whereas a UTC-anchored caller is still in 2026-10.
+	localAfterMidnight := time.Date(2026, 11, 15, 0, 30, 0, 0, shanghai)
+	shanghaiPeriod := billingPeriodFor(localAfterMidnight, 15)
+	if shanghaiPeriod.Key != "2026-11" || shanghaiPeriod.StartDate != "2026-11-15" || shanghaiPeriod.EndDate != "2026-12-14" {
+		t.Fatalf("Shanghai 00:30 period = %+v, want 2026-11 (2026-11-15..2026-12-14)", shanghaiPeriod)
+	}
+
+	utcEquivalent := localAfterMidnight.UTC()
+	utcPeriod := billingPeriodFor(utcEquivalent, 15)
+	if utcPeriod.Key != "2026-10" || utcPeriod.StartDate != "2026-10-15" || utcPeriod.EndDate != "2026-11-14" {
+		t.Fatalf("UTC 16:30 period = %+v, want 2026-10 (2026-10-15..2026-11-14)", utcPeriod)
+	}
+}
+
 func sqliteURLForTest(t *testing.T, path string) string {
 	t.Helper()
 	dsn, err := sqliteDSN(path)

@@ -92,7 +92,7 @@ func (s *sqliteAgentDomain) recordAgentStateReportOnce(ctx context.Context, node
 
 func insertAgentStateSampleTx(ctx context.Context, tx *sql.Tx, nodeID string, state AgentStateRequest, receivedAt time.Time, enforceRateLimit bool) (bool, error) {
 	receivedUnix := receivedAt.UTC().Unix()
-	sampleTS := time.Unix(state.TS, 0).UTC()
+	sampleTS := time.Unix(state.TS, 0)
 	sampleID := strings.TrimSpace(state.effectiveSampleID())
 	if sampleID != "" && !validAgentStateSampleID(sampleID) {
 		return false, errInvalidAgentStateReport

@@ -48,6 +48,10 @@ export function AdminTargetWorkspace({ targets, nodes, onCreate, onUpdate, onReo
   )
 }
 
+function targetTypeLabel(type: ProbeType): string {
+  return targetTypeOptions.find((option) => option.value === type)?.label ?? type
+}
+
 function AdminTargetList({ targets, onEdit, onDelete, onReorder }: { targets: AdminProbeTarget[]; onEdit: (targetId: string) => void; onDelete: (targetId: string) => MaybePromise; onReorder: (targetIds: string[]) => MaybePromise }) {
   const [pendingDelete, setPendingDelete] = useState<AdminProbeTarget | null>(null)
 
@@ -63,6 +67,7 @@ function AdminTargetList({ targets, onEdit, onDelete, onReorder }: { targets: Ad
           <div className="admin-list-head" aria-hidden="true">
             <span>目标</span>
             <span>地址</span>
+            <span>探测参数</span>
             <span>节点</span>
             <span>操作</span>
           </div>
@@ -71,9 +76,16 @@ function AdminTargetList({ targets, onEdit, onDelete, onReorder }: { targets: Ad
           <>
             <div className="admin-list-main admin-inline-sort-main">
               {dragHandle}
-              <strong>{target.name}</strong>
+              <span className="admin-node-name-stack">
+                <strong className="admin-target-title">
+                  <span>{target.name}</span>
+                  <span className="admin-type-badge">{targetTypeLabel(target.type)}</span>
+                </strong>
+                <span className="admin-node-subline admin-target-subline">{formatTargetEndpoint(target)}</span>
+              </span>
             </div>
-            <span data-label="地址">{formatTargetEndpoint(target)}</span>
+            <span data-label="地址" className="admin-target-endpoint">{formatTargetEndpoint(target)}</span>
+            <span data-label="探测参数" className="admin-target-params">{target.count} 次 · 超时 {target.timeoutMs} ms · 每 {target.intervalSec} s</span>
             <span data-label="节点">{formatTargetAssignmentSummary(target)}</span>
             <AdminRowActions
               entityLabel="目标"

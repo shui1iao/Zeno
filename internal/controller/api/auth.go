@@ -37,7 +37,15 @@ var (
 )
 
 type sqliteAgentAccess struct {
-	db *sql.DB
+	db     *sql.DB
+	readDB *sql.DB
+}
+
+func (s *sqliteAgentAccess) queryReadDB() *sql.DB {
+	if s.readDB != nil {
+		return s.readDB
+	}
+	return s.db
 }
 
 const dummyAdminPasswordHash = "argon2id:v=19:m=65536:t=3:p=2:emVuby1kdW1teS1zYWx0:MfaHhKQHaOt+QsALfIOerW4EtUmf5zKMiHhxvflHstY"
@@ -219,7 +227,7 @@ func (s *sqliteAgentAccess) AuthorizeAgent(ctx context.Context, nodeID, token st
 	var storedHash string
 	var pendingHash sql.NullString
 	var pendingExpiresAt sql.NullInt64
-	err := s.db.QueryRowContext(ctx, `
+	err := s.queryReadDB().QueryRowContext(ctx, `
 		SELECT token_hash, pending_token_hash, pending_token_expires_at
 		FROM nodes
 		WHERE id = ? AND disabled = 0

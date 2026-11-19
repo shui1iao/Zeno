@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -22,8 +23,22 @@ func TestOpenSQLiteStoreAllowsWALReadsWhileWriterTransactionIsOpen(t *testing.T)
 	if err := store.SeedPreviewData(ctx, PreviewSeedOptions{NodeID: "example-node-a", DisplayName: "Example Node A", AgentToken: "token"}); err != nil {
 		t.Fatalf("seed preview data: %v", err)
 	}
-	if got := store.db.Stats().MaxOpenConnections; got < 2 {
-		t.Fatalf("max open connections = %d, want concurrent WAL readers", got)
+	if got := store.db.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("writer max open connections = %d, want 1", got)
+	}
+	if store.readDB == nil || store.readDB == store.db {
+		t.Fatal("expected dedicated readDB pool for file-backed SQLite store")
+	}
+	if got := store.readDB.Stats().MaxOpenConnections; got < 2 {
+		t.Fatalf("reader max open connections = %d, want concurrent WAL readers", got)
+	}
+
+	var syncMode int
+	if err := store.db.QueryRowContext(ctx, `PRAGMA synchronous`).Scan(&syncMode); err != nil {
+		t.Fatalf("read writer synchronous pragma: %v", err)
+	}
+	if syncMode != 2 { // 2 = FULL
+		t.Fatalf("writer PRAGMA synchronous = %d, want 2 (FULL)", syncMode)
 	}
 
 	tx, err := store.db.BeginTx(ctx, nil)
@@ -40,20 +55,47 @@ func TestOpenSQLiteStoreAllowsWALReadsWhileWriterTransactionIsOpen(t *testing.T)
 	if _, err := store.NodeLatency(readCtx, "example-node-a", latencyWindow{Name: "1h", Samples: 20, Step: 3 * time.Minute}); err != nil {
 		t.Fatalf("history read blocked behind writer transaction: %v", err)
 	}
+	if _, err := store.Summary(readCtx); err != nil {
+		t.Fatalf("public summary blocked behind writer transaction: %v", err)
+	}
+	if _, err := store.AdminNodes(readCtx); err != nil {
+		t.Fatalf("admin nodes blocked behind writer transaction: %v", err)
+	}
+	if _, err := store.AdminAlertRules(readCtx); err != nil {
+		t.Fatalf("admin alert rules blocked behind writer transaction: %v", err)
+	}
 
 	for index := 0; index < 3; index++ {
-		conn, err := store.db.Conn(ctx)
+		conn, err := store.readDB.Conn(readCtx)
 		if err != nil {
-			t.Fatalf("open pooled connection %d: %v", index, err)
+			t.Fatalf("open pooled read connection %d: %v", index, err)
 		}
-		var foreignKeys int
-		if err := conn.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		var foreignKeys, queryOnly, tempStore int
+		if err := conn.QueryRowContext(readCtx, `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
 			conn.Close()
 			t.Fatalf("read foreign_keys on connection %d: %v", index, err)
 		}
+		if err := conn.QueryRowContext(readCtx, `PRAGMA query_only`).Scan(&queryOnly); err != nil {
+			conn.Close()
+			t.Fatalf("read query_only on connection %d: %v", index, err)
+		}
+		if err := conn.QueryRowContext(readCtx, `PRAGMA temp_store`).Scan(&tempStore); err != nil {
+			conn.Close()
+			t.Fatalf("read temp_store on connection %d: %v", index, err)
+		}
+		_, writeErr := conn.ExecContext(readCtx, `UPDATE probe_config_meta SET version = version + 1 WHERE id = 1`)
 		conn.Close()
 		if foreignKeys != 1 {
-			t.Fatalf("foreign_keys on pooled connection %d = %d, want 1", index, foreignKeys)
+			t.Fatalf("foreign_keys on pooled read connection %d = %d, want 1", index, foreignKeys)
+		}
+		if queryOnly != 1 {
+			t.Fatalf("query_only on pooled read connection %d = %d, want 1", index, queryOnly)
+		}
+		if tempStore != 2 {
+			t.Fatalf("temp_store on pooled read connection %d = %d, want 2 (MEMORY)", index, tempStore)
+		}
+		if writeErr == nil {
+			t.Fatalf("expected readDB connection %d to reject write statement", index)
 		}
 	}
 }
@@ -64,6 +106,8 @@ func TestConcurrentProbeTargetPatchRevalidatesAfterWriterLock(t *testing.T) {
 		t.Fatalf("open sqlite store: %v", err)
 	}
 	defer store.Close()
+	store.db.SetMaxOpenConns(2)
+	store.db.SetMaxIdleConns(2)
 	ctx := context.Background()
 	if err := store.SeedPreviewData(ctx, PreviewSeedOptions{NodeID: "example-node-a", DisplayName: "Example Node A", AgentToken: "token"}); err != nil {
 		t.Fatalf("seed preview data: %v", err)
@@ -407,5 +451,103 @@ func sqliteConcurrencyAgentState(ts int64, sampleID string) AgentStateRequest {
 		NetInSpeedBps:    128,
 		NetOutSpeedBps:   256,
 		UptimeSeconds:    3600,
+	}
+}
+
+func TestOpenSQLiteStoreInMemorySharesPoolAndClosesCleanly(t *testing.T) {
+	store, err := OpenSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatalf("open in-memory store: %v", err)
+	}
+	if store.readDB != store.db {
+		store.Close()
+		t.Fatal("in-memory store must share db and readDB so readers see the same database")
+	}
+	ctx := context.Background()
+	if err := store.SeedPreviewData(ctx, PreviewSeedOptions{NodeID: "mem-node", DisplayName: "Memory Node", AgentToken: "mem-token"}); err != nil {
+		store.Close()
+		t.Fatalf("seed in-memory store: %v", err)
+	}
+	summary, err := store.Summary(ctx)
+	if err != nil {
+		store.Close()
+		t.Fatalf("read summary from in-memory store: %v", err)
+	}
+	if len(summary.Nodes) != 1 || summary.Nodes[0].ID != "mem-node" {
+		store.Close()
+		t.Fatalf("summary nodes = %+v, want mem-node", summary.Nodes)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close in-memory store: %v", err)
+	}
+}
+
+func TestWALCheckpointerTruncatesOversizedWALWithoutBlocking(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "zeno.db")
+	store, err := OpenSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	if err := store.SeedPreviewData(ctx, PreviewSeedOptions{NodeID: "wal-node", DisplayName: "WAL Node", AgentToken: "token"}); err != nil {
+		t.Fatalf("seed node: %v", err)
+	}
+	// Hold a read transaction on readDB while writing so frames accumulate in the -wal file.
+	readTx, err := store.readDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("begin read tx: %v", err)
+	}
+	var count int
+	if err := readTx.QueryRowContext(ctx, `SELECT COUNT(*) FROM nodes`).Scan(&count); err != nil {
+		_ = readTx.Rollback()
+		t.Fatalf("pin read snapshot: %v", err)
+	}
+
+	if _, err := store.db.ExecContext(ctx, `
+		WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM c WHERE x < 5000)
+		INSERT INTO state_samples (node_id, ts, cpu_percent)
+		SELECT 'wal-node', x, 10 FROM c
+	`); err != nil {
+		_ = readTx.Rollback()
+		t.Fatalf("grow wal: %v", err)
+	}
+
+	walPath := dbPath + "-wal"
+	beforeInfo, err := os.Stat(walPath)
+	if err != nil || beforeInfo.Size() == 0 {
+		_ = readTx.Rollback()
+		t.Fatalf("expected non-empty wal file before checkpoint, size=%v err=%v", beforeInfo, err)
+	}
+
+	// Lower threshold for deterministic unit test and verify checkpoint does NOT
+	// block even while readTx is still open.
+	store.walCheckpoint.mu.Lock()
+	store.walCheckpoint.truncateMinBytes = 1024
+	store.walCheckpoint.truncateMinInterval = time.Minute
+	store.walCheckpoint.mu.Unlock()
+
+	start := time.Now()
+	if err := store.checkpointWALOnce(ctx, start); err != nil {
+		_ = readTx.Rollback()
+		t.Fatalf("checkpoint while reader open: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		_ = readTx.Rollback()
+		t.Fatalf("checkpoint blocked for %s while reader open", elapsed)
+	}
+	_ = readTx.Rollback()
+
+	// Once reader is released and minInterval has elapsed, TRUNCATE shrinks -wal to 0 bytes.
+	if err := store.checkpointWALOnce(ctx, start.Add(2*time.Minute)); err != nil {
+		t.Fatalf("truncate checkpoint after reader closed: %v", err)
+	}
+	afterInfo, err := os.Stat(walPath)
+	if err != nil {
+		t.Fatalf("stat wal after truncate: %v", err)
+	}
+	if afterInfo.Size() != 0 {
+		t.Fatalf("wal size after truncate = %d, want 0", afterInfo.Size())
 	}
 }

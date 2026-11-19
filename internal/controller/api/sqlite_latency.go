@@ -32,12 +32,23 @@ func (s *sqliteLatencyQueries) latencyPoints(ctx context.Context, nodeID string,
 	}
 	defer rows.Close()
 
-	return scanLatencyRows(rows, []LatencyPoint(nil), func(ts, targetID, targetName string, median, avg *float64, loss float64) LatencyPoint {
-		return LatencyPoint{TS: ts, TargetID: targetID, TargetName: targetName, MedianMS: median, AvgMS: avg, LossPercent: loss}
+	return scanLatencyRows(rows, []LatencyPoint(nil), func(ts string, tsUnix int64, targetID, targetName string, median, avg *float64, loss float64) LatencyPoint {
+		return LatencyPoint{TS: ts, TSUnix: tsUnix, TargetID: targetID, TargetName: targetName, MedianMS: median, AvgMS: avg, LossPercent: loss}
 	})
 }
 
-func scanLatencyRows[T any](rows *sql.Rows, points []T, point func(ts, dimensionID, dimensionName string, median, avg *float64, loss float64) T) ([]T, error) {
+func (s *floatSlab) nullFloatPtr(value sql.NullFloat64) *float64 {
+	if !value.Valid {
+		return nil
+	}
+	return s.alloc(value.Float64)
+}
+
+func scanLatencyRows[T any](rows *sql.Rows, points []T, point func(ts string, tsUnix int64, dimensionID, dimensionName string, median, avg *float64, loss float64) T) ([]T, error) {
+	var slab floatSlab
+	var lastTS int64
+	var lastTSFormatted string
+	var hasLastTS bool
 	for rows.Next() {
 		var ts int64
 		var dimensionID, dimensionName string
@@ -46,7 +57,12 @@ func scanLatencyRows[T any](rows *sql.Rows, points []T, point func(ts, dimension
 		if err := rows.Scan(&ts, &dimensionID, &dimensionName, &median, &avg, &loss); err != nil {
 			return nil, err
 		}
-		points = append(points, point(time.Unix(ts, 0).UTC().Format(time.RFC3339), dimensionID, dimensionName, floatPtr(median), floatPtr(avg), loss))
+		if !hasLastTS || ts != lastTS {
+			lastTS = ts
+			lastTSFormatted = time.Unix(ts, 0).UTC().Format(time.RFC3339)
+			hasLastTS = true
+		}
+		points = append(points, point(lastTSFormatted, ts, dimensionID, dimensionName, slab.nullFloatPtr(median), slab.nullFloatPtr(avg), loss))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -76,6 +92,7 @@ type latencyGridTarget struct {
 
 type latencyGridPointValue struct {
 	TS          string
+	TSUnix      int64
 	Series      latencyGridTarget
 	MedianMS    *float64
 	AvgMS       *float64
@@ -104,22 +121,19 @@ func (bucket *latencyGridBucket) add(median, avg sql.NullFloat64, loss float64) 
 	bucket.lossCount++
 }
 
-func (bucket latencyGridBucket) medianPtr() *float64 {
+func (bucket latencyGridBucket) medianPtr(slab *floatSlab) *float64 {
 	if bucket.medianCount == 0 {
 		return nil
 	}
-	value := bucket.medianSum / float64(bucket.medianCount)
-	return &value
+	return slab.alloc(bucket.medianSum / float64(bucket.medianCount))
 }
 
-func (bucket latencyGridBucket) avgPtr() *float64 {
+func (bucket latencyGridBucket) avgPtr(slab *floatSlab) *float64 {
 	if bucket.avgCount > 0 {
-		value := bucket.avgSum / float64(bucket.avgCount)
-		return &value
+		return slab.alloc(bucket.avgSum / float64(bucket.avgCount))
 	}
 	if bucket.medianCount > 0 {
-		value := bucket.medianSum / float64(bucket.medianCount)
-		return &value
+		return slab.alloc(bucket.medianSum / float64(bucket.medianCount))
 	}
 	return nil
 }
@@ -209,7 +223,7 @@ func latencyGridSampleQuery(dimension latencyGridDimension) string {
 	`
 }
 
-func latencyGridSampleValuesFor(ctx context.Context, s *sqliteLatencyQueries, id string, window latencyWindow, dimension latencyGridDimension) ([]latencyGridPointValue, error) {
+func latencyGridSamplePointsFor[T any](ctx context.Context, s *sqliteLatencyQueries, id string, window latencyWindow, dimension latencyGridDimension, convert func(latencyGridPointValue) T) ([]T, error) {
 	start, _, stepSeconds := latencyGridBounds(window)
 	rows, err := s.db.QueryContext(ctx, latencyGridSampleQuery(dimension),
 		start.Unix(), stepSeconds, window.Samples,
@@ -220,7 +234,11 @@ func latencyGridSampleValuesFor(ctx context.Context, s *sqliteLatencyQueries, id
 	}
 	defer rows.Close()
 
-	points := make([]latencyGridPointValue, 0, window.Samples)
+	var points []T
+	var slab floatSlab
+	var firstBucketTS, lastBucketTS int64
+	var lastTS string
+	var hasFirstBucket, hasLastTS, sized bool
 	for rows.Next() {
 		var bucketTS int64
 		var series latencyGridTarget
@@ -228,16 +246,38 @@ func latencyGridSampleValuesFor(ctx context.Context, s *sqliteLatencyQueries, id
 		if err := rows.Scan(&bucketTS, &series.ID, &series.Name, &median, &avg, &loss); err != nil {
 			return nil, err
 		}
-		points = append(points, latencyGridPointValue{
-			TS:          time.Unix(bucketTS, 0).UTC().Format(time.RFC3339),
+		if !hasFirstBucket {
+			firstBucketTS = bucketTS
+			hasFirstBucket = true
+			points = make([]T, 0, 16)
+		} else if !sized && bucketTS != firstBucketTS && window.Samples > 1 {
+			exactCap := window.Samples * len(points)
+			if exactCap > cap(points) {
+				grown := make([]T, len(points), exactCap)
+				copy(grown, points)
+				points = grown
+			}
+			sized = true
+		}
+		if !hasLastTS || bucketTS != lastBucketTS {
+			lastBucketTS = bucketTS
+			lastTS = time.Unix(bucketTS, 0).UTC().Format(time.RFC3339)
+			hasLastTS = true
+		}
+		points = append(points, convert(latencyGridPointValue{
+			TS:          lastTS,
+			TSUnix:      bucketTS,
 			Series:      series,
-			MedianMS:    floatPtr(median),
-			AvgMS:       floatPtr(avg),
+			MedianMS:    slab.nullFloatPtr(median),
+			AvgMS:       slab.nullFloatPtr(avg),
 			LossPercent: nullFloatOr(loss, 0),
-		})
+		}))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if points == nil {
+		return []T{}, nil
 	}
 	return points, nil
 }
@@ -268,29 +308,30 @@ func latencyGridQuery(dimension latencyGridDimension) string {
 	`
 }
 
-// latencyGridValuesFor renders one neutral bucketed grid: it lists the enabled
+// latencyGridPointsFor renders one neutral bucketed grid: it lists the enabled
 // series for the requested id, aggregates raw rounds plus rollups into
 // fixed-width buckets, and emits a dense value per (bucket, series) pair.
-func latencyGridValuesFor(
+func latencyGridPointsFor[T any](
 	ctx context.Context,
 	s *sqliteLatencyQueries,
 	id string,
 	window latencyWindow,
 	dimension latencyGridDimension,
-) ([]latencyGridPointValue, error) {
+	convert func(latencyGridPointValue) T,
+) ([]T, error) {
 	gridWindow, ok := resolveLatencyGridWindow(window.Name)
 	if !ok {
 		return nil, nil
 	}
 	if extendedHistoryWindow(gridWindow) {
-		return latencyGridSampleValuesFor(ctx, s, id, gridWindow, dimension)
+		return latencyGridSamplePointsFor(ctx, s, id, gridWindow, dimension, convert)
 	}
 	series, err := s.latencyGridSeries(ctx, dimension.seriesQuery, id)
 	if err != nil {
 		return nil, err
 	}
 	if len(series) == 0 {
-		return []latencyGridPointValue{}, nil
+		return []T{}, nil
 	}
 
 	start, end, stepSeconds := latencyGridBounds(gridWindow)
@@ -333,7 +374,9 @@ func latencyGridValuesFor(
 		return nil, err
 	}
 
-	points := make([]latencyGridPointValue, 0, gridWindow.Samples*len(series))
+	totalPoints := gridWindow.Samples * len(series)
+	points := make([]T, 0, totalPoints)
+	slab := floatSlab{buf: make([]float64, 0, totalPoints*2)}
 	for index := 0; index < gridWindow.Samples; index++ {
 		bucketTS := start.Add(time.Duration(index) * gridWindow.Step).Unix()
 		ts := time.Unix(bucketTS, 0).UTC().Format(time.RFC3339)
@@ -341,29 +384,14 @@ func latencyGridValuesFor(
 			var median, avg *float64
 			loss := float64(0)
 			if bucket := buckets[item.ID][bucketTS]; bucket != nil {
-				median = bucket.medianPtr()
-				avg = bucket.avgPtr()
+				median = bucket.medianPtr(&slab)
+				avg = bucket.avgPtr(&slab)
 				loss = bucket.lossPercent()
 			}
-			points = append(points, latencyGridPointValue{
-				TS: ts, Series: item, MedianMS: median, AvgMS: avg, LossPercent: loss,
-			})
+			points = append(points, convert(latencyGridPointValue{
+				TS: ts, TSUnix: bucketTS, Series: item, MedianMS: median, AvgMS: avg, LossPercent: loss,
+			}))
 		}
-	}
-	return points, nil
-}
-
-func latencyGridPointsFor[T any](ctx context.Context, s *sqliteLatencyQueries, id string, window latencyWindow, dimension latencyGridDimension, convert func(latencyGridPointValue) T) ([]T, error) {
-	values, err := latencyGridValuesFor(ctx, s, id, window, dimension)
-	if err != nil {
-		return nil, err
-	}
-	if values == nil {
-		return nil, nil
-	}
-	points := make([]T, 0, len(values))
-	for _, value := range values {
-		points = append(points, convert(value))
 	}
 	return points, nil
 }
@@ -373,7 +401,7 @@ func (s *sqliteLatencyQueries) latencyGridPoints(ctx context.Context, nodeID str
 }
 
 func latencyPointFromGridValue(point latencyGridPointValue) LatencyPoint {
-	return LatencyPoint{TS: point.TS, TargetID: point.Series.ID, TargetName: point.Series.Name, MedianMS: point.MedianMS, AvgMS: point.AvgMS, LossPercent: point.LossPercent}
+	return LatencyPoint{TS: point.TS, TSUnix: point.TSUnix, TargetID: point.Series.ID, TargetName: point.Series.Name, MedianMS: point.MedianMS, AvgMS: point.AvgMS, LossPercent: point.LossPercent}
 }
 
 func (s *sqliteLatencyQueries) latencyGridSeries(ctx context.Context, query, id string) ([]latencyGridTarget, error) {
@@ -426,7 +454,7 @@ func (s *sqliteLatencyQueries) statePoints(ctx context.Context, nodeID string, w
 		return nil, err
 	}
 	defer rows.Close()
-	return scanStateHistoryRows(rows)
+	return scanStateHistoryRows(rows, window.Samples)
 }
 
 func useHistoricalStateSampling(window latencyWindow) bool {
@@ -449,13 +477,18 @@ func (s *sqliteLatencyQueries) aggregatedStatePoints(ctx context.Context, nodeID
 		return nil, err
 	}
 	defer rows.Close()
-	return scanStateHistoryRows(rows)
+	return scanStateHistoryRows(rows, window.Samples)
 }
 
-func scanStateHistoryRows(rows *sql.Rows) ([]StatePoint, error) {
+func scanStateHistoryRows(rows *sql.Rows, capHint int) ([]StatePoint, error) {
 	var points []StatePoint
+	var slab floatSlab
 	for rows.Next() {
-		point, err := scanStateHistoryPoint(rows)
+		if points == nil && capHint > 0 {
+			points = make([]StatePoint, 0, capHint)
+			slab.buf = make([]float64, 0, capHint*len(history.StateRollupMetrics))
+		}
+		point, err := scanStateHistoryPointInto(rows, &slab)
 		if err != nil {
 			return nil, err
 		}

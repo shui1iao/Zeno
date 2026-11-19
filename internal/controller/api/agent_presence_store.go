@@ -125,7 +125,7 @@ func (s *sqliteAgentDomain) recordAgentPresenceTransition(ctx context.Context, n
 }
 
 func (s *sqliteAgentDomain) StaleAgentOfflineNodeIDs(ctx context.Context, now time.Time) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.queryReadDB().QueryContext(ctx, `
 		SELECT n.id, n.last_seen_at,
 		       COALESCE((
 		         SELECT MAX(ar.duration_sec)

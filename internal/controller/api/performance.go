@@ -107,8 +107,12 @@ func (performance *runtimePerformance) snapshot(now time.Time) runtimePerformanc
 }
 
 func (s *sqliteMonitoringDomain) RuntimePerformance(ctx context.Context) (sqliteRuntimePerformance, error) {
+	readDB := s.readDB
+	if readDB == nil {
+		readDB = s.db
+	}
 	snapshot := sqliteRuntimePerformance{BusyRetries: s.writes.busyRetries.Load()}
-	if err := s.db.QueryRowContext(ctx, `
+	if err := readDB.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(SUM(CASE WHEN pending_target <> '' THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN pending_attempts > 0 THEN 1 ELSE 0 END), 0)
@@ -118,7 +122,7 @@ func (s *sqliteMonitoringDomain) RuntimePerformance(ctx context.Context) (sqlite
 	}
 	// MAX(rowid) is index-local and remains cheap on multi-gigabyte databases.
 	// It is deliberately labelled approximate because retention creates gaps.
-	if err := s.db.QueryRowContext(ctx, `
+	if err := readDB.QueryRowContext(ctx, `
 		SELECT
 			COALESCE((SELECT MAX(rowid) FROM latency_history_rollups), 0) - COALESCE((SELECT MIN(rowid) FROM latency_history_rollups), 0) + CASE WHEN EXISTS (SELECT 1 FROM latency_history_rollups LIMIT 1) THEN 1 ELSE 0 END,
 			COALESCE((SELECT MAX(rowid) FROM state_history_rollups), 0) - COALESCE((SELECT MIN(rowid) FROM state_history_rollups), 0) + CASE WHEN EXISTS (SELECT 1 FROM state_history_rollups LIMIT 1) THEN 1 ELSE 0 END,
@@ -127,7 +131,7 @@ func (s *sqliteMonitoringDomain) RuntimePerformance(ctx context.Context) (sqlite
 	`).Scan(&snapshot.LatencyRollupRows, &snapshot.StateRollupRows, &snapshot.RawProbeRoundsApprox, &snapshot.RawStateRowsApprox); err != nil {
 		return sqliteRuntimePerformance{}, err
 	}
-	if err := s.db.QueryRowContext(ctx, `SELECT enabled_after FROM history_rollup_meta WHERE id = 1`).Scan(&snapshot.RollupEnabledAfter); err != nil {
+	if err := readDB.QueryRowContext(ctx, `SELECT enabled_after FROM history_rollup_meta WHERE id = 1`).Scan(&snapshot.RollupEnabledAfter); err != nil {
 		return sqliteRuntimePerformance{}, err
 	}
 	return snapshot, nil

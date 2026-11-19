@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { nodePath, parseDashboardRoute, type DashboardRoute } from '../lib/route'
 
 function blurActiveElement() {
@@ -9,10 +9,20 @@ function blurActiveElement() {
 
 export function useDashboardRouter(onNavigateNode?: () => void) {
   const [route, setRoute] = useState<DashboardRoute>(() => parseDashboardRoute(window.location.pathname))
+  const onNavigateNodeRef = useRef(onNavigateNode)
+  onNavigateNodeRef.current = onNavigateNode
 
   useEffect(() => {
+    const normalizeUnknownHomePath = () => {
+      const pathname = window.location.pathname
+      if (parseDashboardRoute(pathname).kind === 'home' && pathname !== '/' && pathname !== '/index.html') {
+        window.history.replaceState(null, '', '/')
+      }
+    }
+    normalizeUnknownHomePath()
     const handlePopState = () => {
       blurActiveElement()
+      normalizeUnknownHomePath()
       setRoute(parseDashboardRoute(window.location.pathname))
     }
     window.addEventListener('popstate', handlePopState)
@@ -25,22 +35,22 @@ export function useDashboardRouter(onNavigateNode?: () => void) {
     window.scrollTo({ left: 0, top: 0, behavior: 'auto' })
   }, [route.kind, route.kind === 'node' ? route.nodeId : ''])
 
-  const navigateHome = () => {
+  const navigateHome = useCallback(() => {
     blurActiveElement()
     window.history.pushState(null, '', '/')
     setRoute({ kind: 'home' })
-  }
-  const navigateAdmin = () => {
+  }, [])
+  const navigateAdmin = useCallback(() => {
     blurActiveElement()
     window.history.pushState(null, '', '/dashboard')
     setRoute({ kind: 'admin' })
-  }
-  const navigateNode = (nodeId: string) => {
+  }, [])
+  const navigateNode = useCallback((nodeId: string) => {
     blurActiveElement()
     window.history.pushState(null, '', nodePath(nodeId))
-    onNavigateNode?.()
+    onNavigateNodeRef.current?.()
     setRoute({ kind: 'node', nodeId })
-  }
+  }, [])
 
   return { route, navigateHome, navigateAdmin, navigateNode }
 }

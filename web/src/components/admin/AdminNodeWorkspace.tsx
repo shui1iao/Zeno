@@ -4,6 +4,7 @@ import { sortAdminNodes, sortAdminProbeTargets } from '../../lib/adminCollection
 import { runMaybePromise } from '../../lib/maybePromise'
 import type { AdminNode, AdminNodeInstallCommand, AdminProbeTarget } from '../../types'
 import { ServerFlag } from '../ServerFlag'
+import { formatCurrencyAmount, normalizeCurrencyCode } from '../../lib/currency'
 import { AdminDateField, AdminExpandedCheckList, AdminSegmentedField } from './AdminFields'
 import { AdminInstallCommand } from './AdminInstallCommand'
 import { AdminInlineSortList } from './AdminInlineSortList'
@@ -27,7 +28,7 @@ export function AdminNodeWorkspace({ nodes, targets, onCreate, onUpdate, onReord
       />
 
       {nodes.length === 0 && <div className="admin-state-card">还没有节点。</div>}
-      {nodes.length > 0 && <AdminNodeList nodes={orderedNodes} onEdit={setEditingNodeId} onDelete={onDelete} onReorder={onReorder} />}
+      {nodes.length > 0 && <AdminNodeList nodes={orderedNodes} onEdit={setEditingNodeId} onDelete={onDelete} onReorder={onReorder} onInstallCommand={onInstallCommand} />}
 
       <AdminModalPresence>{creatingNode && (
         <AdminNodeCreateModal
@@ -51,7 +52,71 @@ export function AdminNodeWorkspace({ nodes, targets, onCreate, onUpdate, onReord
   )
 }
 
-function AdminNodeList({ nodes, onEdit, onDelete, onReorder }: { nodes: AdminNode[]; onEdit: (nodeId: string) => void; onDelete: (nodeId: string) => MaybePromise; onReorder: (nodeIds: string[]) => MaybePromise }) {
+function adminNodeBillingText(node: AdminNode): string {
+  const amount = node.renewalAmount
+  if (amount === null || amount === undefined || !Number.isFinite(amount) || amount <= 0) return '--'
+  const cycle = (node.billingCycle ?? '').trim()
+  return `${formatCurrencyAmount(amount, normalizeCurrencyCode(node.renewalCurrency), { spaced: true })}${cycle ? ` / ${cycle}` : ''}`
+}
+
+function billingCycleMonths(cycle: string | undefined): number {
+  const value = (cycle ?? '').trim()
+  if (value === '') return 0
+  if (value.includes('五年') || value.includes('5年') || value.includes('5 年')) return 60
+  if (value.includes('三年') || value.includes('3年') || value.includes('3 年')) return 36
+  if (value.includes('两年') || value.includes('二年') || value.includes('2年') || value.includes('2 年')) return 24
+  if (value.includes('半年') || value.includes('半 年')) return 6
+  if (value.includes('季')) return 3
+  if (value.includes('年')) return 12
+  if (value.includes('月')) return 1
+  return 0
+}
+
+function addMonthsClamped(year: number, month: number, day: number, offsetMonths: number): { year: number; month: number; day: number; ms: number } {
+  const totalMonths = year * 12 + (month - 1) + offsetMonths
+  const nextYear = Math.floor(totalMonths / 12)
+  const nextMonth = totalMonths - nextYear * 12 + 1
+  const lastDay = new Date(Date.UTC(nextYear, nextMonth, 0)).getUTCDate()
+  const clampedDay = Math.min(day, lastDay)
+  return { year: nextYear, month: nextMonth, day: clampedDay, ms: Date.UTC(nextYear, nextMonth - 1, clampedDay) }
+}
+
+function adminNodeExpiry(node: AdminNode, now: Date = new Date()): string {
+  if (node.expiryPermanent) return '永久'
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(node.expiryDate ?? '')
+  if (!match) return '未设置到期日'
+  const anchorYear = Number(match[1])
+  const anchorMonth = Number(match[2])
+  const anchorDay = Number(match[3])
+  const todayYear = now.getFullYear()
+  const todayMonth = now.getMonth() + 1
+  const todayDay = now.getDate()
+  const today = Date.UTC(todayYear, todayMonth - 1, todayDay)
+  const cycleMonths = billingCycleMonths(node.billingCycle)
+  let target = { year: anchorYear, month: anchorMonth, day: anchorDay, ms: Date.UTC(anchorYear, anchorMonth - 1, anchorDay) }
+  if (cycleMonths > 0) {
+    const monthsApart = (todayYear - anchorYear) * 12 + (todayMonth - anchorMonth)
+    let offset = monthsApart > 0 ? Math.floor(monthsApart / cycleMonths) * cycleMonths : 0
+    target = addMonthsClamped(anchorYear, anchorMonth, anchorDay, offset)
+    while (target.ms <= today) {
+      offset += cycleMonths
+      target = addMonthsClamped(anchorYear, anchorMonth, anchorDay, offset)
+    }
+    while (true) {
+      const prev = addMonthsClamped(anchorYear, anchorMonth, anchorDay, offset - cycleMonths)
+      if (prev.ms <= today) break
+      offset -= cycleMonths
+      target = prev
+    }
+  }
+  const days = Math.ceil((target.ms - today) / 86400000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const date = `${target.year}-${pad(target.month)}-${pad(target.day)}`
+  if (days < 0) return `${date} · 已过期`
+  return `${date} · 剩余 ${days} 天`
+}
+
+function AdminNodeList({ nodes, onEdit, onDelete, onReorder, onInstallCommand }: { nodes: AdminNode[]; onEdit: (nodeId: string) => void; onDelete: (nodeId: string) => MaybePromise; onReorder: (nodeIds: string[]) => MaybePromise; onInstallCommand: (nodeId: string) => Promise<AdminNodeInstallCommand> }) {
   const [pendingDelete, setPendingDelete] = useState<AdminNode | null>(null)
 
   return (
@@ -65,30 +130,51 @@ function AdminNodeList({ nodes, onEdit, onDelete, onReorder }: { nodes: AdminNod
           <div className="admin-list-head" aria-hidden="true">
             <span>服务器</span>
             <span>公网 IP</span>
+            <span>账单 · 到期</span>
             <span>Agent 版本</span>
             <span>操作</span>
           </div>
         )}
-        renderRow={(node, { dragHandle }) => (
-          <>
-            <div className="admin-list-main admin-inline-sort-main">
-              {dragHandle}
-              <strong className="admin-node-title"><ServerFlag countryCode={node.countryCode} className="admin-list-flag" /><span>{node.displayName}</span></strong>
-            </div>
-            <span data-label="公网 IP" className={`admin-ip-stack${node.publicIPv6 ? '' : ' is-single'}`}>
-              {node.publicIPv4 && <span>{node.publicIPv4}</span>}
-              {node.publicIPv6 && <span>{node.publicIPv6}</span>}
-              {!node.publicIPv4 && !node.publicIPv6 && <span>—</span>}
-            </span>
-            <span data-label="Agent 版本">{node.agentVersion || '—'}</span>
-            <AdminRowActions
-              entityLabel="服务器"
-              name={node.displayName}
-              onEdit={() => onEdit(node.id)}
-              onDelete={() => setPendingDelete(node)}
-            />
-          </>
-        )}
+        renderRow={(node, { dragHandle }) => {
+          const liveTone = node.disabled ? 'disabled' : node.status === 'online' ? 'online' : node.status === 'warning' ? 'warning' : 'offline'
+          const liveLabel = node.disabled ? '已停用' : node.status === 'online' ? '在线' : node.status === 'warning' ? '异常' : '离线'
+          const expiry = adminNodeExpiry(node)
+          return (
+            <>
+              <div className="admin-list-main admin-inline-sort-main">
+                {dragHandle}
+                <span className={`admin-node-live-dot is-${liveTone}`} title={liveLabel} aria-label={liveLabel} />
+                <ServerFlag countryCode={node.countryCode} className="admin-list-flag" />
+                <span className="admin-node-name-stack">
+                  <strong className="admin-node-title"><span>{node.displayName}</span></strong>
+                  <span className={`admin-node-subline is-${liveTone}`}>
+                    <span className="admin-node-subline__status">{liveLabel}</span>
+                    <span className="admin-node-subline__ip">{node.publicIPv4 || node.publicIPv6 || ''}</span>
+                  </span>
+                </span>
+              </div>
+              <span data-label="公网 IP" className={`admin-ip-stack${node.publicIPv6 ? '' : ' is-single'}`}>
+                {node.publicIPv4 && <span>{node.publicIPv4}</span>}
+                {node.publicIPv6 && <span>{node.publicIPv6}</span>}
+                {!node.publicIPv4 && !node.publicIPv6 && <span>—</span>}
+              </span>
+              <span data-label="账单" className="admin-node-billing">
+                <span>{adminNodeBillingText(node)}</span>
+                <span className="admin-node-expiry">{expiry}</span>
+              </span>
+              <span data-label="Agent 版本" className="admin-node-version">{node.agentVersion || '—'}</span>
+              <div className="admin-node-row-actions">
+                <AdminInstallCommand nodeId={node.id} nodeName={node.displayName} onInstallCommand={onInstallCommand} variant="icon" />
+                <AdminRowActions
+                  entityLabel="服务器"
+                  name={node.displayName}
+                  onEdit={() => onEdit(node.id)}
+                  onDelete={() => setPendingDelete(node)}
+                />
+              </div>
+            </>
+          )
+        }}
         onReorder={(nextNodes) => onReorder(nextNodes.map((node) => node.id))}
       />
       <AdminModalPresence>{pendingDelete && (

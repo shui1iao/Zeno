@@ -1,13 +1,12 @@
-import { Fragment, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { StatePoint } from '../types'
-import { formatBps, formatBytes, formatPercent, missingValue } from '../lib/format'
+import { formatBps, formatBytes, formatPercent, formatTooltipDateTime, missingValue } from '../lib/format'
 import { availableHistoryRanges } from '../lib/historyRange'
 import { lastFiniteIndex, maxFinite, type ResourceScale } from '../lib/resourceChart'
 import { HistoryRangeSelector } from './HistoryRangeSelector'
 import { SmoothingSelector, type SmoothingMode } from './SmoothingSelector'
 import { smoothStatePoints } from '../lib/smoothStatePoints'
-import { latencyTargetCorners } from '../lib/targetGridCorners'
-import { ResourceChart, type ResourceChartExtraRow, type ResourceChartSeries } from './ResourceChart'
+import { ResourceMiniChart, type ResourceChartExtraRow, type ResourceChartSeries } from './ResourceChart'
 
 interface StateHistoryPanelProps {
   points: StatePoint[]
@@ -34,35 +33,54 @@ export interface ResourceMetric {
   extraTitle?: string
 }
 
-// The metric tiles reuse the latency target grid; six fit one desktop row.
-const DESKTOP_METRIC_COLUMNS = 6
-const MOBILE_METRIC_COLUMNS = 3
+export interface ResourceReadout {
+  value: string
+  detail: string
+}
+
+/** Header reading of one small chart: the latest sample, or the hovered one. */
+export function resourceReadout(metric: ResourceMetric, index: number | null): ResourceReadout {
+  if (index === null) {
+    return { value: metric.value, detail: [metric.detail, metric.extra].filter(Boolean).join(' · ') }
+  }
+  const describe = (key: string) => metric.series.find((item) => item.key === key)?.describe(index) ?? missingValue
+  if (metric.key === 'network') return { value: `↓ ${describe('net-in')}`, detail: `↑ ${describe('net-out')}` }
+  if (metric.key === 'connections') return { value: `${describe('tcp')} / ${describe('udp')}`, detail: '' }
+  const [first, ...rest] = (metric.series[0]?.describe(index) ?? missingValue).split(' · ')
+  const extras = [
+    ...rest,
+    ...metric.series.slice(1).map((item) => `${item.label} ${item.describe(index)}`),
+    ...(metric.extraRows ?? []).map((row) => {
+      const text = row.describe(index)
+      return text === null ? '' : `${row.label} ${text}`
+    }),
+  ].filter(Boolean)
+  return { value: first, detail: extras.join(' · ') }
+}
 
 export function StateHistoryPanel({ points, range, loading = false, error, canUseExtendedRanges = false, onRangeChange = () => {} }: StateHistoryPanelProps) {
   const rangeOptions = availableHistoryRanges(canUseExtendedRanges)
   const sorted = useMemo(() => sortStatePoints(points), [points])
   const timestamps = useMemo(() => sorted.map((point) => Date.parse(point.ts)), [sorted])
   const metrics = useMemo(() => buildResourceMetrics(sorted), [sorted])
-  // Unlike the latency chart, the resource chart opens smoothed. The tiles keep
-  // the real latest values; only the drawn lines (and their tooltips) change.
+  // Unlike the latency chart, the resource charts open smoothed. The readings
+  // keep the real values; only the drawn lines change.
   const [smoothing, setSmoothing] = useState<SmoothingMode>('smooth')
   const chartMetrics = useMemo(
     () => (smoothing === 'smooth' ? buildResourceMetrics(smoothStatePoints(sorted)) : metrics),
     [smoothing, sorted, metrics],
   )
-  // Like the latency targets: nothing selected means every metric is drawn.
-  const [selectedKeys, setSelectedKeys] = useState<string[]>([])
-  const view = useMemo(() => buildChartView(chartMetrics, selectedKeys), [chartMetrics, selectedKeys])
-  const toggleMetric = (key: string) => setSelectedKeys((current) => (current.includes(key) ? current.filter((item) => item !== key) : [...current, key]))
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const activeHoverIndex = hoverIndex !== null && hoverIndex < timestamps.length ? hoverIndex : null
   const sampleCount = sorted.length
-  const total = metrics.length
 
   return (
     <section className="monitor-panel resource-history-panel" aria-label="agent state history">
       <header className="resource-history-header">
         <div className="monitor-title-row">
-          <h3>系统资源趋势</h3>
+          <h3>系统资源</h3>
           <SmoothingSelector value={smoothing} onChange={setSmoothing} ariaLabel="资源曲线平滑" />
+          {sampleCount > 0 && <span className="resource-history-meta">{activeHoverIndex === null ? '当前读数' : `${formatTooltipDateTime(timestamps[activeHoverIndex])} 的读数`}</span>}
         </div>
         <HistoryRangeSelector
           ariaLabel="resource history range selector"
@@ -78,57 +96,39 @@ export function StateHistoryPanel({ points, range, loading = false, error, canUs
       {!loading && !error && sampleCount === 0 && <div className="detail-state" data-state="empty" role="status" aria-live="polite">暂无系统资源趋势数据</div>}
 
       {!loading && !error && sampleCount > 0 && (
-        <>
-          <div className="latency-target-grid resource-metric-grid" role="group" aria-label="resource metrics">
-            {metrics.map((metric, index) => {
-              const active = selectedKeys.includes(metric.key)
-              return (
-                <button
-                  key={metric.key}
-                  type="button"
-                  aria-pressed={active}
-                  data-active={active}
-                  data-metric={metric.key}
-                  data-desktop-corners={latencyTargetCorners(index, total, DESKTOP_METRIC_COLUMNS)}
-                  data-mobile-corners={latencyTargetCorners(index, total, MOBILE_METRIC_COLUMNS)}
-                  data-desktop-full-row-end={(index + 1) % DESKTOP_METRIC_COLUMNS === 0}
-                  data-desktop-last-row={index >= Math.floor((total - 1) / DESKTOP_METRIC_COLUMNS) * DESKTOP_METRIC_COLUMNS}
-                  data-mobile-full-row-end={(index + 1) % MOBILE_METRIC_COLUMNS === 0}
-                  data-mobile-last-row={index >= Math.floor((total - 1) / MOBILE_METRIC_COLUMNS) * MOBILE_METRIC_COLUMNS}
-                  title={[metric.title, metric.value, metric.detail, metric.extraTitle || metric.extra].filter(Boolean).join(' · ')}
-                  onClick={() => toggleMetric(metric.key)}
-                >
-                  <span className="latency-target-name">
-                    <i className="latency-target-color" style={{ backgroundColor: metric.series[0]?.color }} aria-hidden="true" />
-                    <span>{metric.title}</span>
+        <div className="resource-multiples" role="group" aria-label="resource metrics">
+          {metrics.map((metric, index) => {
+            const chartMetric = chartMetrics[index] ?? metric
+            const readout = resourceReadout(metric, activeHoverIndex)
+            return (
+              <article key={metric.key} className="resource-multiple" data-metric={metric.key} title={[metric.title, metric.value, metric.detail, metric.extraTitle || metric.extra].filter(Boolean).join(' · ')}>
+                <header className="resource-multiple__head">
+                  <span className="resource-multiple__title">
+                    <i style={{ backgroundColor: metric.series[0]?.color }} aria-hidden="true" />
+                    {metric.title}
                   </span>
-                  <span className="resource-metric-body">
-                    <strong>{metric.value}</strong>
-                    {metric.detail && <em>{metric.detail}</em>}
-                    {metric.extra && (
-                      <em className="resource-metric-extra">
-                        {metric.extra.split(' / ').map((part, partIndex) => (
-                          <Fragment key={partIndex}>
-                            {partIndex > 0 && ' / '}
-                            <span>{part}</span>
-                          </Fragment>
-                        ))}
-                      </em>
-                    )}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          <ResourceChart
-            key={`${view.key}:${smoothing}`}
-            label={view.label}
-            scale={view.scale}
-            series={view.series}
-            extraRows={view.extraRows}
-            timestamps={timestamps}
-          />
-        </>
+                  <strong className="resource-multiple__value">{readout.value}</strong>
+                </header>
+                <div className="resource-multiple__detail">
+                  {metric.series.length > 1 && (
+                    <span className="resource-multiple__legend">
+                      {metric.series.map((item) => <span key={item.key}><i className={item.key === 'swap' ? 'is-dashed' : undefined} style={{ color: item.color }} />{item.label}</span>)}
+                    </span>
+                  )}
+                  <span className="resource-multiple__text">{readout.detail || '\u00a0'}</span>
+                </div>
+                <ResourceMiniChart
+                  label={metric.title}
+                  scale={chartMetric.scale}
+                  series={chartMetric.series}
+                  timestamps={timestamps}
+                  hoverIndex={activeHoverIndex}
+                  onHoverIndexChange={setHoverIndex}
+                />
+              </article>
+            )
+          })}
+        </div>
       )}
     </section>
   )

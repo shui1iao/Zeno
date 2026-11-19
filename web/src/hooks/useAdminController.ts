@@ -27,6 +27,12 @@ export function useAdminController(isAdminRoute: boolean, { initialSettings = de
   const [adminAuthState, setAdminAuthState] = useState<AdminAuthState>({ kind: 'idle' })
   const [adminState, dispatchAdminState] = useReducer(adminStateReducer, { kind: 'idle' })
   const [settings, setSettings] = useState<AdminSettings>(initialSettings)
+  const onSettingsChangeRef = useRef(onSettingsChange)
+  onSettingsChangeRef.current = onSettingsChange
+  const commitServerSettings = (nextSettings: AdminSettings) => {
+    setSettings(nextSettings)
+    onSettingsChangeRef.current?.(nextSettings)
+  }
 
   const commitAdminToken = (token: string) => {
     adminTokenRef.current = token
@@ -80,7 +86,6 @@ export function useAdminController(isAdminRoute: boolean, { initialSettings = de
   }
 
   useEffect(() => { onTokenChange?.(adminToken) }, [adminToken, onTokenChange])
-  useEffect(() => { onSettingsChange?.(settings) }, [settings, onSettingsChange])
   useEffect(() => {
     if (adminToken === '') setSettings(initialSettings)
   }, [adminToken, initialSettings])
@@ -120,7 +125,7 @@ export function useAdminController(isAdminRoute: boolean, { initialSettings = de
           expireAdminSession(requestTokenIdentity)
           return
         }
-        if (settingsResult.status === 'fulfilled') setSettings(settingsResult.value)
+        if (settingsResult.status === 'fulfilled') commitServerSettings(settingsResult.value)
         dispatchAdminState({
           type: 'details.loaded',
           account: accountResult.status === 'fulfilled' ? accountResult.value : undefined,
@@ -338,14 +343,14 @@ export function useAdminController(isAdminRoute: boolean, { initialSettings = de
   const updateAdminSettingsDetails = (input: AdminSettingsUpdateInput): Promise<AdminSettings | undefined> => runAdminMutation(
     (requestToken, signal) => updateAdminSettings(requestToken, input, signal),
     (updatedSettings) => {
-      setSettings(updatedSettings)
+      commitServerSettings(updatedSettings)
       return updatedSettings
     },
   ).catch((error: unknown) => {
     // Conflict responses carry a fresh authenticated snapshot. Keep the app
     // shell and the settings form on the same revision immediately instead of
     // waiting for the next periodic admin refresh.
-    if (error instanceof AdminSettingsConflictError) setSettings(error.latestSettings)
+    if (error instanceof AdminSettingsConflictError) commitServerSettings(error.latestSettings)
     throw error
   })
 

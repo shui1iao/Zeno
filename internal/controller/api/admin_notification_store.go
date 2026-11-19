@@ -14,7 +14,11 @@ var adminNotificationTypeCatalog = []AdminNotificationType{
 }
 
 func (s *sqliteNotificationDomain) AdminNotificationChannels(ctx context.Context) ([]AdminNotificationChannel, error) {
-	rows, err := s.db.QueryContext(ctx, `
+	readDB := s.readDB
+	if readDB == nil {
+		readDB = s.db
+	}
+	rows, err := readDB.QueryContext(ctx, `
 		SELECT id, name, destination, credential, enabled, created_at, updated_at
 		FROM notification_channels
 		ORDER BY id ASC

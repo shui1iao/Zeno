@@ -102,11 +102,14 @@ function AdminInstallPlatformPopover({ state, style, popoverRef, onSelect }: {
   return typeof document === 'undefined' ? popover : createPortal(popover, document.body)
 }
 
-export function AdminInstallCommand({ nodeId, initialMessage, blocked = false, onInstallCommand }: {
+export function AdminInstallCommand({ nodeId, initialMessage, blocked = false, onInstallCommand, variant = 'section', nodeName }: {
   nodeId: string
   initialMessage?: ReactNode
   blocked?: boolean
   onInstallCommand: (nodeId: string) => Promise<AdminNodeInstallCommand>
+  /** `icon` renders only a row action button with the same platform picker. */
+  variant?: 'section' | 'icon'
+  nodeName?: string
 }) {
   const [installCommandState, setInstallCommandState] = useState<InstallCommandState>({ kind: 'idle' })
   const [installCommandNodeId, setInstallCommandNodeId] = useState(nodeId)
@@ -147,6 +150,13 @@ export function AdminInstallCommand({ nodeId, initialMessage, blocked = false, o
       setInstallPlatformPickerOpen(false)
     }
   }, [blocked])
+
+  // The row icon has no room for an inline note; its confirmation fades back.
+  useEffect(() => {
+    if (variant !== 'icon' || installCopyState.kind === 'idle') return undefined
+    const timer = window.setTimeout(() => setInstallCopyState({ kind: 'idle' }), 2400)
+    return () => window.clearTimeout(timer)
+  }, [variant, installCopyState])
 
   const requestInstallCommand = (openPickerAfterGenerate = false) => {
     if (blocked) return
@@ -216,6 +226,39 @@ export function AdminInstallCommand({ nodeId, initialMessage, blocked = false, o
       .catch(offerManualCopy)
   }
 
+  if (variant === 'icon') {
+    const noteKind = installCopyState.kind
+    const noteText = noteKind === 'idle' ? '' : installCopyState.message
+    const errorText = currentInstallCommandState.kind === 'error' ? `安装命令生成失败：${currentInstallCommandState.message}` : ''
+    const label = `复制 ${nodeName ?? ''} 安装命令`.replace('  ', ' ')
+    return (
+      <div className="admin-install-copy-menu is-icon">
+        <button
+          ref={installCopyButtonRef}
+          className={`admin-row-action is-icon admin-install-icon-button${noteKind === 'ready' ? ' is-copied' : ''}${errorText || noteKind === 'error' ? ' is-error' : ''}`}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={installPlatformPickerVisible}
+          aria-label={label}
+          title={errorText || noteText || '复制安装命令'}
+          onClick={handleCopyInstallCommand}
+          disabled={installCommandButtonDisabled(blocked, currentInstallCommandState)}
+        >
+          {noteKind === 'ready' ? <InstallCopiedIcon /> : <InstallTerminalIcon />}
+          <span className="sr-only">{noteText || '复制安装命令'}</span>
+        </button>
+        {installPlatformPickerVisible && (
+          <AdminInstallPlatformPopover
+            state={currentInstallCommandState}
+            style={installPlatformMenuStyle}
+            popoverRef={installPlatformPopoverRef}
+            onSelect={handleCopyInstallPlatform}
+          />
+        )}
+      </div>
+    )
+  }
+
   return (
     <AdminFormSection title="Agent 接入">
       <div className="admin-inline-actions admin-install-copy-row">
@@ -245,6 +288,23 @@ export function AdminInstallCommand({ nodeId, initialMessage, blocked = false, o
       </div>
       {currentInstallCommandState.kind === 'error' && <div className="admin-install-error">安装命令生成失败：{currentInstallCommandState.message}</div>}
     </AdminFormSection>
+  )
+}
+
+function InstallTerminalIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="3" y="4.5" width="18" height="15" rx="2.5" />
+      <path d="m7 9.5 3 2.5-3 2.5M12.5 15H17" />
+    </svg>
+  )
+}
+
+function InstallCopiedIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m5 12.5 4.5 4.5L19 7.5" />
+    </svg>
   )
 }
 

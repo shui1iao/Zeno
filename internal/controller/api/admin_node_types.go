@@ -89,6 +89,14 @@ type AdminNodesResponse struct {
 	Nodes []AdminNode `json:"nodes"`
 }
 
+func (response AdminNodesResponse) MarshalJSON() ([]byte, error) {
+	type alias AdminNodesResponse
+	if response.Nodes == nil {
+		response.Nodes = []AdminNode{}
+	}
+	return json.Marshal(alias(response))
+}
+
 type AdminNodeResponse struct {
 	Node AdminNode `json:"node"`
 }

@@ -21,12 +21,17 @@ interface LatencyChartProps {
   hideLegend?: boolean
   peakCut?: boolean
   activeTargetIds?: string[]
+  /** Temporarily emphasised series while its target tile is hovered. */
+  highlightTargetId?: string | null
   /** Colour per series id in the global (admin) order; falls back to the local index. */
   seriesColors?: ReadonlyMap<string, string>
 }
 
-const desktopLayout = { width: 960, height: 360, lineStrokeWidth: 1, pad: { left: 60, right: 24, top: 24, bottom: 44 } }
-const mobileLayout = { width: 400, height: 320, lineStrokeWidth: 1, pad: { left: 50, right: 16, top: 22, bottom: 44 } }
+const desktopLayout = { width: 960, height: 372, lineStrokeWidth: 1, pad: { left: 60, right: 24, top: 24, bottom: 58 } }
+const mobileLayout = { width: 400, height: 332, lineStrokeWidth: 1, pad: { left: 50, right: 16, top: 22, bottom: 58 } }
+/** Gap between the plot and the packet-loss lane, and the lane height. */
+const lossLaneOffset = 15
+const lossLaneHeight = 5
 const packetLossColor = '#94a3b8'
 const maxDrawableLatencyMs = 5000
 
@@ -35,7 +40,11 @@ export function latencySeriesColor(index: number): string {
 }
 
 function seriesColorResolver(series: KulinTargetSeries[], seriesColors?: ReadonlyMap<string, string>) {
-  return (key: string): string => seriesColors?.get(key) ?? latencySeriesColor(paletteIndexForKey(series, key))
+  const indexByKey = new Map<string, number>()
+  series.forEach((item, index) => {
+    if (!indexByKey.has(item.targetId)) indexByKey.set(item.targetId, index)
+  })
+  return (key: string): string => seriesColors?.get(key) ?? latencySeriesColor(indexByKey.get(key) ?? 0)
 }
 
 export function LatencyChart({
@@ -47,6 +56,7 @@ export function LatencyChart({
   hideLegend = false,
   peakCut = false,
   activeTargetIds = [],
+  highlightTargetId = null,
   seriesColors,
 }: LatencyChartProps) {
   const { width, height, lineStrokeWidth, pad } = useLatencyChartLayout()
@@ -81,10 +91,11 @@ export function LatencyChart({
     : series), [series, activeTargetKey])
   const [hoverColumn, setHoverColumn] = useState<HoverColumn | null>(null)
 
-  const x = (createdAt: number) => {
+  const plotWidth = width - pad.left - pad.right
+  const x = useMemo(() => (createdAt: number) => {
     if (timeSpan <= 0) return pad.left
-    return pad.left + ((createdAt - timeStart) / timeSpan) * (width - pad.left - pad.right)
-  }
+    return pad.left + ((createdAt - timeStart) / timeSpan) * plotWidth
+  }, [pad.left, plotWidth, timeSpan, timeStart])
   // The nominal first tick can be one sample cadence before the oldest row
   // (1440 one-minute samples contain 1439 intervals). Give axis labels their own
   // domain so that nominal tick lands exactly on the left edge and every fixed-
@@ -96,12 +107,18 @@ export function LatencyChart({
   const firstAxisTick = candidateAxisTicks[0]
   const axisTimeStart = firstAxisTick !== undefined && firstAxisTick < timeStart ? firstAxisTick : timeStart
   const axisTimeSpan = Math.max(0, timeEnd - axisTimeStart)
-  const axisX = (createdAt: number) => {
+  const axisX = useMemo(() => (createdAt: number) => {
     if (axisTimeSpan <= 0) return pad.left
-    return pad.left + ((createdAt - axisTimeStart) / axisTimeSpan) * (width - pad.left - pad.right)
-  }
-  const yDelay = (value: number) => pad.top + (1 - (value - domain.min) / (domain.max - domain.min)) * plotHeight
-  const yLoss = (value: number) => pad.top + (1 - Math.max(0, Math.min(100, value)) / 100) * plotHeight
+    return pad.left + ((createdAt - axisTimeStart) / axisTimeSpan) * plotWidth
+  }, [axisTimeSpan, axisTimeStart, pad.left, plotWidth])
+  const yDelay = useMemo(
+    () => (value: number) => pad.top + (1 - (value - domain.min) / (domain.max - domain.min)) * plotHeight,
+    [domain.max, domain.min, pad.top, plotHeight],
+  )
+  const yLoss = useMemo(
+    () => (value: number) => pad.top + (1 - Math.max(0, Math.min(100, value)) / 100) * plotHeight,
+    [pad.top, plotHeight],
+  )
 
   // Tick selection above is time-based, so it cannot know how wide the rendered
   // labels are. The newest sample is "now" and is force-added as the final tick,
@@ -109,13 +126,37 @@ export function LatencyChart({
   // a few pixels. Drop labels that would physically collide, keeping the last
   // one: the right edge is the reading anchor, so a stale-looking axis end is
   // worse than one missing intermediate mark.
-  const axisTicks = pruneCollidingAxisTicks(
+  const axisTicks = useMemo(() => pruneCollidingAxisTicks(
     candidateAxisTicks,
     (tick) => clampAxisTickX(axisX(tick), width, pad),
     (tick) => formatAxisTime(tick, timestamps),
     axisLabelCharWidth,
     (tick) => axisTickAnchor(axisX(tick), width, pad),
+  ), [axisLabelCharWidth, axisX, candidateAxisTicks, pad, timestamps, width])
+
+  const lossAreaD = useMemo(
+    () => (lossRows.length > 0 && baseView.packetLossKey ? packetLossAreaPath(lossRows, baseView.packetLossKey, x, yLoss) : ''),
+    [baseView.packetLossKey, lossRows, x, yLoss],
   )
+  const linePathsByKey = useMemo(
+    () => new Map(visibleLineKeys.map((key) => [key, linePath(rows, key, x, yDelay)])),
+    [rows, visibleLineKeys, x, yDelay],
+  )
+  // Focused views keep the other targets as faint context on the focused scale.
+  const contextPaths = useMemo(() => {
+    if (activeTargetIds.length === 0) return []
+    const visible = new Set(visibleLineKeys)
+    return series
+      .filter((item) => !visible.has(item.targetId))
+      .map((item) => ({ key: item.targetId, d: linePath(allRows, item.targetId, x, yDelay) }))
+  }, [activeTargetKey, allRows, series, visibleLineKeys, x, yDelay])
+  const lossLane = useMemo(
+    () => lossLaneBins(series, activeTargetIds.length > 0 ? visibleLineKeys : series.map((item) => item.targetId), timeStart, timeSpan, Math.max(12, Math.floor(plotWidth / 6))),
+    [activeTargetKey, plotWidth, series, timeSpan, timeStart, visibleLineKeys],
+  )
+  const lossLaneY = pad.top + plotHeight + lossLaneOffset
+  const emphasisKey = activeTargetIds.length === 0 && highlightTargetId && visibleLineKeys.includes(highlightTargetId) ? highlightTargetId : null
+  const orderedLineKeys = emphasisKey ? [...visibleLineKeys.filter((key) => key !== emphasisKey), emphasisKey] : visibleLineKeys
 
   const setActiveHoverColumn = (column: HoverColumn | null) => {
     setHoverColumn((current) => (current?.createdAt === column?.createdAt ? current : column))
@@ -202,10 +243,10 @@ export function LatencyChart({
           )
         })}
 
-        {lossRows.length > 0 && baseView.packetLossKey && (
+        {lossAreaD !== '' && (
           <path
             className="packet-loss-area"
-            d={packetLossAreaPath(lossRows, baseView.packetLossKey, x, yLoss)}
+            d={lossAreaD}
             fill={packetLossColor}
             fillOpacity={0.18}
             stroke="none"
@@ -213,17 +254,46 @@ export function LatencyChart({
           />
         )}
 
-        {visibleLineKeys.map((key) => (
+        {contextPaths.map((item) => (
           <path
-            key={key}
-            d={linePath(rows, key, x, yDelay)}
+            key={`context-${item.key}`}
+            className="latency-context-line"
+            d={item.d}
             fill="none"
-            stroke={colorFor(key)}
+            stroke={colorFor(item.key)}
+            strokeOpacity={0.1}
             strokeWidth={lineStrokeWidth}
             vectorEffect="non-scaling-stroke"
             clipPath={`url(#${clipId})`}
           />
         ))}
+
+        {orderedLineKeys.map((key) => (
+          <path
+            key={key}
+            className={emphasisKey === key ? 'latency-line is-emphasis' : 'latency-line'}
+            d={linePathsByKey.get(key) ?? ''}
+            fill="none"
+            stroke={colorFor(key)}
+            strokeOpacity={emphasisKey && emphasisKey !== key ? 0.22 : 1}
+            strokeWidth={emphasisKey === key || activeTargetIds.length === 1 ? lineStrokeWidth * 1.6 : lineStrokeWidth}
+            vectorEffect="non-scaling-stroke"
+            clipPath={`url(#${clipId})`}
+          />
+        ))}
+
+        {lossLane.length > 0 && (
+          <g className="latency-loss-lane" aria-label="丢包轨道">
+            <text x={pad.left - 6} y={lossLaneY + lossLaneHeight} className="axis-label latency-loss-lane__label" textAnchor="end">丢包</text>
+            {lossLane.map((bin) => {
+              const x0 = pad.left + bin.start * plotWidth
+              const x1 = pad.left + bin.end * plotWidth
+              return (
+                <rect key={bin.start} className={`latency-loss-bin is-${bin.tone}`} x={x0} y={lossLaneY} width={Math.max(1, x1 - x0 - 1)} height={lossLaneHeight} rx={1} />
+              )
+            })}
+          </g>
+        )}
 
         {hoverColumn && (
           <g className="latency-hover-column is-active">
@@ -255,7 +325,7 @@ export function LatencyChart({
           width={width - pad.left - pad.right}
           height={plotHeight}
           aria-hidden="true"
-          aria-label={hoverColumn?.title ?? '延迟图表悬浮区域'}
+          aria-label={hoverColumn ? hoverColumnTitle(hoverColumn) : '延迟图表悬浮区域'}
           onMouseEnter={handleHoverMove}
           onMouseMove={handleHoverMove}
           onClick={handleHoverMove}
@@ -282,6 +352,62 @@ export function LatencyChart({
       )}
     </section>
   )
+}
+
+export type LossLaneTone = 'none' | 'light' | 'warning' | 'danger' | 'empty'
+
+export interface LossLaneBin {
+  start: number
+  end: number
+  tone: LossLaneTone
+}
+
+/**
+ * Average packet loss of the visible targets per time bucket, so loss is readable
+ * under the latency lines. Buckets without any sample are "no data", which is
+ * distinct from a measured 0%.
+ */
+export function lossLaneBins(series: KulinTargetSeries[], keys: string[], timeStart: number, timeSpan: number, binCount: number): LossLaneBin[] {
+  if (timeSpan < 0 || binCount <= 0 || keys.length === 0) return []
+  const wanted = new Set(keys)
+  if (timeSpan === 0) {
+    let sum = 0
+    let count = 0
+    series.forEach((item) => {
+      if (!wanted.has(item.targetId)) return
+      item.points.forEach((point) => {
+        if (point.packet_loss === null || !Number.isFinite(point.packet_loss)) return
+        if (point.created_at !== timeStart) return
+        sum += point.packet_loss
+        count += 1
+      })
+    })
+    if (count === 0) return []
+    const average = sum / count
+    const tone: LossLaneTone = average >= 5 ? 'danger' : average >= 1 ? 'warning' : average > 0 ? 'light' : 'none'
+    return [{ start: 0, end: 1 / binCount, tone }]
+  }
+  const sums = new Array<number>(binCount).fill(0)
+  const counts = new Array<number>(binCount).fill(0)
+  series.forEach((item) => {
+    if (!wanted.has(item.targetId)) return
+    item.points.forEach((point) => {
+      if (point.packet_loss === null || !Number.isFinite(point.packet_loss)) return
+      const ratio = (point.created_at - timeStart) / timeSpan
+      if (ratio < 0 || ratio > 1) return
+      const bin = Math.min(binCount - 1, Math.floor(ratio * binCount))
+      sums[bin] += point.packet_loss
+      counts[bin] += 1
+    })
+  })
+  return sums.map((sum, bin) => {
+    const start = bin / binCount
+    const end = (bin + 1) / binCount
+    if (counts[bin] === 0) return { start, end, tone: 'empty' as const }
+    const average = sum / counts[bin]
+    const tone: LossLaneTone = average >= 5 ? 'danger' : average >= 1 ? 'warning' : average > 0 ? 'light' : 'none'
+    return { start, end, tone }
+  })
 }
 
 function useLatencyChartLayout() {
@@ -334,19 +460,19 @@ function LatencyTooltip({ column, colorFor, x: tooltipAnchorX, layout }: { colum
 
 function linePath(rows: KulinChartRow[], key: string, x: (createdAt: number) => number, y: (value: number) => number): string {
   let hasOpenSegment = false
-  return rows
-    .map((row) => {
-      const value = rowNumber(row, key)
-      if (value === null) {
-        hasOpenSegment = false
-        return ''
-      }
-      const command = hasOpenSegment ? 'L' : 'M'
-      hasOpenSegment = true
-      return `${command} ${x(row.created_at).toFixed(2)} ${y(value).toFixed(2)}`
-    })
-    .filter(Boolean)
-    .join(' ')
+  const parts: string[] = []
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]
+    const value = rowNumber(row, key)
+    if (value === null) {
+      hasOpenSegment = false
+      continue
+    }
+    const command = hasOpenSegment ? 'L' : 'M'
+    hasOpenSegment = true
+    parts.push(`${command} ${x(row.created_at).toFixed(2)} ${y(value).toFixed(2)}`)
+  }
+  return parts.join(' ')
 }
 
 function packetLossAreaPath(rows: KulinChartRow[], packetLossKey: string, x: (createdAt: number) => number, yLoss: (value: number) => number): string {
@@ -426,38 +552,33 @@ interface HoverPoint {
 
 interface HoverColumn {
   createdAt: number
-  title: string
   points: HoverPoint[]
+}
+
+function hoverColumnTitle(column: HoverColumn): string {
+  return [
+    formatTooltipTime(column.createdAt),
+    ...column.points.map((point) => `${point.label} · ${formatLatencyValue(point.delay)}`),
+  ].join('\n')
 }
 
 function hoverColumnsForRows(rows: KulinChartRow[], keys: string[], series: KulinTargetSeries[]): HoverColumn[] {
   const labelsByTargetId = new Map(series.map((target) => [target.targetId, target.targetName]))
-  return rows
-    .map((row) => {
-      const points = keys
-        .map((key) => {
-          const delay = rowNumber(row, key)
-          if (delay === null) return null
-          return {
-            key,
-            label: labelsByTargetId.get(key) ?? key,
-            delay,
-          }
-        })
-        .filter((point): point is HoverPoint => point !== null)
-      if (points.length === 0) return null
-      const title = [
-        formatTooltipTime(row.created_at),
-        ...points.map((point) => `${point.label} · ${formatLatencyValue(point.delay)}`),
-      ].join('\n')
-      return { createdAt: row.created_at, title, points }
-    })
-    .filter((column): column is HoverColumn => column !== null)
-}
-
-function paletteIndexForKey(series: KulinTargetSeries[], key: string): number {
-  const index = series.findIndex((item) => item.targetId === key)
-  return Math.max(index, 0)
+  const columns: HoverColumn[] = []
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex]
+    const points: HoverPoint[] = []
+    for (let keyIndex = 0; keyIndex < keys.length; keyIndex += 1) {
+      const key = keys[keyIndex]
+      const delay = rowNumber(row, key)
+      if (delay === null) continue
+      points.push({ key, label: labelsByTargetId.get(key) ?? key, delay })
+    }
+    if (points.length > 0) {
+      columns.push({ createdAt: row.created_at, points })
+    }
+  }
+  return columns
 }
 
 function formatLatencyValue(value: number): string {

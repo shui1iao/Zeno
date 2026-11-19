@@ -52,9 +52,9 @@ func (s *sqliteHistoryStore) compactHistoryBatch(ctx context.Context, insertSQL 
 	return removed, err
 }
 
-// scanStateHistoryPoint unpacks one aggregated row. Column order must match
+// scanStateHistoryPointInto unpacks one aggregated row. Column order must match
 // history.StateRollupMetrics.
-func scanStateHistoryPoint(rows *sql.Rows) (StatePoint, error) {
+func scanStateHistoryPointInto(rows *sql.Rows, slab *floatSlab) (StatePoint, error) {
 	var ts int64
 	var cpuPercent, load1, load5, load15, memoryUsed, memoryTotal, swapUsed, swapTotal, diskUsed, diskTotal, netInTotal, netOutTotal, netInSpeed, netOutSpeed, processCount, tcpConnectionCount, udpConnectionCount, uptimeSeconds sql.NullFloat64
 	if err := rows.Scan(&ts, &cpuPercent, &load1, &load5, &load15, &memoryUsed, &memoryTotal, &swapUsed, &swapTotal, &diskUsed, &diskTotal, &netInTotal, &netOutTotal, &netInSpeed, &netOutSpeed, &processCount, &tcpConnectionCount, &udpConnectionCount, &uptimeSeconds); err != nil {
@@ -62,23 +62,24 @@ func scanStateHistoryPoint(rows *sql.Rows) (StatePoint, error) {
 	}
 	return StatePoint{
 		TS:                 time.Unix(ts, 0).UTC().Format(time.RFC3339),
-		CPUPercent:         floatPtr(cpuPercent),
-		Load1:              floatPtr(load1),
-		Load5:              floatPtr(load5),
-		Load15:             floatPtr(load15),
-		MemoryUsedBytes:    floatPtr(memoryUsed),
-		MemoryTotalBytes:   floatPtr(memoryTotal),
-		SwapUsedBytes:      floatPtr(swapUsed),
-		SwapTotalBytes:     floatPtr(swapTotal),
-		DiskUsedBytes:      floatPtr(diskUsed),
-		DiskTotalBytes:     floatPtr(diskTotal),
-		NetInTotalBytes:    floatPtr(netInTotal),
-		NetOutTotalBytes:   floatPtr(netOutTotal),
-		NetInSpeedBps:      floatPtr(netInSpeed),
-		NetOutSpeedBps:     floatPtr(netOutSpeed),
-		ProcessCount:       floatPtr(processCount),
-		TCPConnectionCount: floatPtr(tcpConnectionCount),
-		UDPConnectionCount: floatPtr(udpConnectionCount),
-		UptimeSeconds:      floatPtr(uptimeSeconds),
+		TSUnix:             ts,
+		CPUPercent:         slab.nullFloatPtr(cpuPercent),
+		Load1:              slab.nullFloatPtr(load1),
+		Load5:              slab.nullFloatPtr(load5),
+		Load15:             slab.nullFloatPtr(load15),
+		MemoryUsedBytes:    slab.nullFloatPtr(memoryUsed),
+		MemoryTotalBytes:   slab.nullFloatPtr(memoryTotal),
+		SwapUsedBytes:      slab.nullFloatPtr(swapUsed),
+		SwapTotalBytes:     slab.nullFloatPtr(swapTotal),
+		DiskUsedBytes:      slab.nullFloatPtr(diskUsed),
+		DiskTotalBytes:     slab.nullFloatPtr(diskTotal),
+		NetInTotalBytes:    slab.nullFloatPtr(netInTotal),
+		NetOutTotalBytes:   slab.nullFloatPtr(netOutTotal),
+		NetInSpeedBps:      slab.nullFloatPtr(netInSpeed),
+		NetOutSpeedBps:     slab.nullFloatPtr(netOutSpeed),
+		ProcessCount:       slab.nullFloatPtr(processCount),
+		TCPConnectionCount: slab.nullFloatPtr(tcpConnectionCount),
+		UDPConnectionCount: slab.nullFloatPtr(udpConnectionCount),
+		UptimeSeconds:      slab.nullFloatPtr(uptimeSeconds),
 	}, nil
 }
