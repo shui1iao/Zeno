@@ -4,7 +4,7 @@
 # pins keep rebuild inputs immutable; version upgrades update CI and these two
 # stages together. Published images include provenance and SBOM attestations.
 
-FROM --platform=$BUILDPLATFORM node:26.7.0-bookworm-slim@sha256:cd565714d4da3e84bfd341e31448f81d47c6362198f152345297c9c1154e6341 AS web-builder
+FROM --platform=$BUILDPLATFORM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS web-builder
 WORKDIR /src/web
 COPY web/package*.json ./
 RUN npm ci
