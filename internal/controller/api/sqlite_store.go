@@ -85,8 +85,8 @@ const (
 	// Keep SQLite's one-writer authority behind a fair, bounded scheduler shared
 	// by Agent writes and recurring maintenance. Short busy waits still cover
 	// external SQLite writers without allowing an unbounded process-global queue.
-	sqliteAgentWriteTimeout  = 8 * time.Second
-	sqliteBusyRetryFor       = 6 * time.Second
+	sqliteAgentWriteTimeout  = 18 * time.Second
+	sqliteBusyRetryFor       = 12 * time.Second
 	sqliteBusyRetryInitial   = 25 * time.Millisecond
 	sqliteBusyRetryMax       = 250 * time.Millisecond
 	historyRetentionWriteKey = "_history_retention"

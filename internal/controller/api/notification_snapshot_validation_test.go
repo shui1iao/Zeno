@@ -55,21 +55,21 @@ func TestProductionSnapshotFirstReconcileIsSilent(t *testing.T) {
 	}
 	seeded := readSnapshotStates(t, store)
 	fmt.Fprintf(report, "- 迁移 %s 已记录；种子写入 %d 行：%s\n", notificationReconcileSeedMigration, len(seeded), countStatesByKind(seeded))
-	var alibabaLastSeen int64
-	if err := store.db.QueryRowContext(ctx, `SELECT last_seen_at FROM nodes WHERE id = 'alibaba'`).Scan(&alibabaLastSeen); err != nil {
-		t.Fatalf("read alibaba last_seen_at: %v", err)
+	var nodeBLastSeen int64
+	if err := store.db.QueryRowContext(ctx, `SELECT last_seen_at FROM nodes WHERE id = 'node-b'`).Scan(&nodeBLastSeen); err != nil {
+		t.Fatalf("read nodeB last_seen_at: %v", err)
 	}
-	tarek := seeded[notificationStateKey{ChannelID: "telegram-d1c2ee3a", NodeID: "tarek-e97b62a6", Kind: notificationKindLiveness}]
-	alibaba := seeded[notificationStateKey{ChannelID: "telegram-d1c2ee3a", NodeID: "alibaba", Kind: notificationKindLiveness}]
-	if tarek.Notified != livenessStateOnline {
-		t.Errorf("Tarek seeded %+v, want notified=online", tarek)
+	nodeH := seeded[notificationStateKey{ChannelID: "telegram-sample", NodeID: "node-h-sample", Kind: notificationKindLiveness}]
+	nodeB := seeded[notificationStateKey{ChannelID: "telegram-sample", NodeID: "node-b", Kind: notificationKindLiveness}]
+	if nodeH.Notified != livenessStateOnline {
+		t.Errorf("NodeH seeded %+v, want notified=online", nodeH)
 	}
-	if alibaba.Notified != livenessStateOffline || alibaba.IncidentFrom != alibabaLastSeen || alibaba.IncidentFrom == 0 {
-		t.Errorf("Alibaba seeded %+v, want notified=offline incident_from=%d", alibaba, alibabaLastSeen)
+	if nodeB.Notified != livenessStateOffline || nodeB.IncidentFrom != nodeBLastSeen || nodeB.IncidentFrom == 0 {
+		t.Errorf("NodeB seeded %+v, want notified=offline incident_from=%d", nodeB, nodeBLastSeen)
 	}
-	fmt.Fprintf(report, "- 种子 Tarek：notified=%s incident_from=%d\n", tarek.Notified, tarek.IncidentFrom)
-	fmt.Fprintf(report, "- 种子 Alibaba：notified=%s incident_from=%d（%s，= nodes.last_seen_at）\n",
-		alibaba.Notified, alibaba.IncidentFrom, time.Unix(alibaba.IncidentFrom, 0).In(testShanghai).Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(report, "- 种子 NodeH：notified=%s incident_from=%d\n", nodeH.Notified, nodeH.IncidentFrom)
+	fmt.Fprintf(report, "- 种子 NodeB：notified=%s incident_from=%d（%s，= nodes.last_seen_at）\n",
+		nodeB.Notified, nodeB.IncidentFrom, time.Unix(nodeB.IncidentFrom, 0).In(testShanghai).Format("2006-01-02 15:04:05"))
 	for _, key := range sortedStateKeys(seeded) {
 		row := seeded[key]
 		if key.Kind == notificationKindLiveness || row.Notified != "" {
@@ -131,9 +131,9 @@ func TestProductionSnapshotFirstReconcileIsSilent(t *testing.T) {
 	if len(after) != expected {
 		t.Errorf("state rows after first rounds = %d, want %d (node x kind with an enabled rule in scope and a known actual)", len(after), expected)
 	}
-	if after[notificationStateKey{ChannelID: "telegram-d1c2ee3a", NodeID: "tarek-e97b62a6", Kind: notificationKindLiveness}].Notified != livenessStateOnline ||
-		after[notificationStateKey{ChannelID: "telegram-d1c2ee3a", NodeID: "alibaba", Kind: notificationKindLiveness}].Notified != livenessStateOffline {
-		t.Errorf("Tarek/Alibaba changed during the first rounds")
+	if after[notificationStateKey{ChannelID: "telegram-sample", NodeID: "node-h-sample", Kind: notificationKindLiveness}].Notified != livenessStateOnline ||
+		after[notificationStateKey{ChannelID: "telegram-sample", NodeID: "node-b", Kind: notificationKindLiveness}].Notified != livenessStateOffline {
+		t.Errorf("NodeH/NodeB changed during the first rounds")
 	}
 	pending := 0
 	for _, row := range after {

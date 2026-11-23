@@ -36,14 +36,14 @@ func TestReconcileTarekTimeoutIsRetriedAndRecoveryCarriesInterval(t *testing.T) 
 	defer log.SetOutput(previous)
 
 	hs := newReconcileHarness(t, shanghaiTime(2026, 10, 8, 3, 40, 0))
-	hs.addNode("tarek", "Tarek", "203.0.113.9")
+	hs.addNode("node-h", "NodeH", "203.0.113.9")
 	hs.round()
 	if got := hs.tg.receivedTexts(); len(got) != 0 {
 		t.Fatalf("baseline sent %q", got)
 	}
 
 	lastSeen := shanghaiTime(2026, 10, 8, 3, 42, 27)
-	hs.setLiveness("tarek", "offline", lastSeen.Unix())
+	hs.setLiveness("node-h", "offline", lastSeen.Unix())
 	hs.tg.setMode("hang")
 	hs.at(shanghaiTime(2026, 10, 8, 3, 43, 28))
 	offlineText := "🔴[离线] Tarek(203.0.***.***)"
@@ -51,7 +51,7 @@ func TestReconcileTarekTimeoutIsRetriedAndRecoveryCarriesInterval(t *testing.T) 
 		t.Fatalf("written requests = %q, want the offline alert", got)
 	}
 	hs.expectAcked()
-	assertStateRow(t, hs, "tarek", notificationKindLiveness, func(row notificationStateRow) bool {
+	assertStateRow(t, hs, "node-h", notificationKindLiveness, func(row notificationStateRow) bool {
 		return row.Notified == livenessStateOnline && row.PendingTarget == livenessStateOffline && row.PendingAttempts == 1 &&
 			row.LastError == "delivery timed out" && row.IncidentFrom == lastSeen.Unix()
 	}, "a retryable failed alert")
@@ -66,12 +66,12 @@ func TestReconcileTarekTimeoutIsRetriedAndRecoveryCarriesInterval(t *testing.T) 
 	}
 	hs.after(time.Second)
 	hs.expectAcked(offlineText)
-	assertStateRow(t, hs, "tarek", notificationKindLiveness, func(row notificationStateRow) bool {
+	assertStateRow(t, hs, "node-h", notificationKindLiveness, func(row notificationStateRow) bool {
 		return row.Notified == livenessStateOffline && row.PendingTarget == "" && row.PendingAttempts == 0 && row.IncidentFrom == lastSeen.Unix()
 	}, "notified offline after the retry")
 
 	recoveredAt := shanghaiTime(2026, 10, 8, 3, 43, 47)
-	hs.setLiveness("tarek", "online", recoveredAt.Unix())
+	hs.setLiveness("node-h", "online", recoveredAt.Unix())
 	hs.at(recoveredAt)
 	hs.at(recoveredAt.Add(59 * time.Second))
 	hs.expectAcked(offlineText)
@@ -80,7 +80,7 @@ func TestReconcileTarekTimeoutIsRetriedAndRecoveryCarriesInterval(t *testing.T) 
 	if got := hs.tg.receivedTexts(); len(got) != 3 {
 		t.Fatalf("written requests = %q, want one accepted duplicate alert plus the recovery", got)
 	}
-	assertStateRow(t, hs, "tarek", notificationKindLiveness, func(row notificationStateRow) bool {
+	assertStateRow(t, hs, "node-h", notificationKindLiveness, func(row notificationStateRow) bool {
 		return row.Notified == livenessStateOnline && row.PendingTarget == "" && row.IncidentFrom == 0
 	}, "settled online")
 	if strings.Contains(logs.String(), "telegram-bot-secret-value") {
@@ -158,7 +158,7 @@ func TestReconcileTelegramOutageDeliversOnlyTheFinalDifference(t *testing.T) {
 func TestReconcileControllerOutageSendsNothingAndDropsEachNodeOnce(t *testing.T) {
 	start := shanghaiTime(2026, 10, 3, 11, 40, 0)
 	hs := newReconcileHarness(t, start)
-	nodes := []string{"sharon", "alibaba", "hytron", "datawave-hk", "aws", "jcloud"}
+	nodes := []string{"node-a", "node-b", "node-c", "node-d", "node-e", "node-f"}
 	for _, node := range nodes {
 		hs.addNode(node, strings.ToUpper(node[:1])+node[1:], "192.0.2.10")
 	}
@@ -205,22 +205,22 @@ func TestReconcileControllerOutageSendsNothingAndDropsEachNodeOnce(t *testing.T)
 // incident_from; the recovery still carries the full interval.
 func TestReconcileRestartDuringIncidentKeepsIncidentAndSendsRecovery(t *testing.T) {
 	hs := newReconcileHarness(t, shanghaiTime(2026, 10, 7, 23, 50, 0))
-	hs.addNode("bero", "Bero", "203.0.113.20")
+	hs.addNode("node-g", "NodeG", "203.0.113.20")
 	hs.round()
 	lastSeen := shanghaiTime(2026, 10, 7, 23, 58, 10)
-	hs.setLiveness("bero", "offline", lastSeen.Unix())
+	hs.setLiveness("node-g", "offline", lastSeen.Unix())
 	hs.at(shanghaiTime(2026, 10, 7, 23, 59, 11))
 	hs.expectAcked("🔴[离线] Bero(203.0.***.***)")
 
 	hs.reopenStore()
-	assertStateRow(t, hs, "bero", notificationKindLiveness, func(row notificationStateRow) bool {
+	assertStateRow(t, hs, "node-g", notificationKindLiveness, func(row notificationStateRow) bool {
 		return row.Notified == livenessStateOffline && row.IncidentFrom == lastSeen.Unix()
 	}, "the incident to survive the restart")
 	hs.at(shanghaiTime(2026, 10, 8, 0, 1, 0))
 	hs.expectAcked("🔴[离线] Bero(203.0.***.***)")
 
 	backAt := shanghaiTime(2026, 10, 8, 0, 3, 20)
-	hs.setLiveness("bero", "online", backAt.Unix())
+	hs.setLiveness("node-g", "online", backAt.Unix())
 	hs.at(backAt)
 	hs.reopenStore()
 	hs.at(backAt.Add(60 * time.Second))
@@ -245,15 +245,15 @@ func (store *crashBeforeStateWriteStore) ApplyNotificationStates(ctx context.Con
 // after the restart the message is sent once more (accepted duplicate).
 func TestReconcileCrashAfterSendBeforeWriteResendsOnce(t *testing.T) {
 	hs := newReconcileHarness(t, shanghaiTime(2026, 10, 6, 12, 0, 0))
-	hs.addNode("alibaba", "Alibaba", "203.0.113.30")
+	hs.addNode("node-b", "NodeB", "203.0.113.30")
 	crashing := &crashBeforeStateWriteStore{SQLiteStore: hs.store}
 	hs.h = hs.newHandler(crashing)
 	hs.round()
-	hs.setLiveness("alibaba", "offline", hs.now().Unix())
+	hs.setLiveness("node-b", "offline", hs.now().Unix())
 	crashing.crash.Store(true)
 	hs.after(70 * time.Second)
 	hs.expectAcked("🔴[离线] Alibaba(203.0.***.***)")
-	assertStateRow(t, hs, "alibaba", notificationKindLiveness, func(row notificationStateRow) bool {
+	assertStateRow(t, hs, "node-b", notificationKindLiveness, func(row notificationStateRow) bool {
 		return row.Notified == livenessStateOnline && row.PendingTarget == livenessStateOffline
 	}, "notified not advanced because the write never happened")
 
@@ -261,7 +261,7 @@ func TestReconcileCrashAfterSendBeforeWriteResendsOnce(t *testing.T) {
 	hs.after(2 * time.Second)
 	hs.after(2 * time.Second)
 	hs.expectAcked("🔴[离线] Alibaba(203.0.***.***)", "🔴[离线] Alibaba(203.0.***.***)")
-	assertStateRow(t, hs, "alibaba", notificationKindLiveness, func(row notificationStateRow) bool {
+	assertStateRow(t, hs, "node-b", notificationKindLiveness, func(row notificationStateRow) bool {
 		return row.Notified == livenessStateOffline && row.PendingTarget == ""
 	}, "notified offline after the resend")
 }
@@ -508,8 +508,8 @@ func setNodeExpiry(t *testing.T, hs *reconcileHarness, nodeID, expiry, cycle str
 func TestReconcileRenewalReminders(t *testing.T) {
 	t.Run("sent on the reminder day and never repeated for the same key", func(t *testing.T) {
 		hs := newReconcileHarness(t, shanghaiTime(2026, 10, 6, 10, 0, 0))
-		hs.addNode("sharon", "Sharon", "203.0.113.50")
-		setNodeExpiry(t, hs, "sharon", "2026-10-10", "")
+		hs.addNode("node-a", "NodeA", "203.0.113.50")
+		setNodeExpiry(t, hs, "node-a", "2026-10-10", "")
 		enableRenewalForHarness(t, hs)
 		hs.round()
 		hs.at(shanghaiTime(2026, 10, 6, 23, 59, 0))
@@ -521,15 +521,15 @@ func TestReconcileRenewalReminders(t *testing.T) {
 			hs.at(at)
 		}
 		hs.expectAcked(want)
-		assertStateRow(t, hs, "sharon", notificationKindRenewal, func(row notificationStateRow) bool {
+		assertStateRow(t, hs, "node-a", notificationKindRenewal, func(row notificationStateRow) bool {
 			return row.Notified == "2026-10-10#3"
 		}, "renewal key notified")
 	})
 
 	t.Run("controller down on the reminder day catches up once the next day", func(t *testing.T) {
 		hs := newReconcileHarness(t, shanghaiTime(2026, 10, 6, 10, 0, 0))
-		hs.addNode("sharon", "Sharon", "")
-		setNodeExpiry(t, hs, "sharon", "2026-10-10", "")
+		hs.addNode("node-a", "NodeA", "")
+		setNodeExpiry(t, hs, "node-a", "2026-10-10", "")
 		enableRenewalForHarness(t, hs)
 		hs.round()
 		hs.at(shanghaiTime(2026, 10, 8, 9, 15, 0))
@@ -541,8 +541,8 @@ func TestReconcileRenewalReminders(t *testing.T) {
 
 	t.Run("first baseline on the reminder day still sends today's reminder", func(t *testing.T) {
 		hs := newReconcileHarness(t, shanghaiTime(2026, 10, 7, 10, 0, 0))
-		hs.addNode("aws", "AWS", "")
-		setNodeExpiry(t, hs, "aws", "2026-08-10", "月")
+		hs.addNode("node-e", "AWS", "")
+		setNodeExpiry(t, hs, "node-e", "2026-08-10", "月")
 		enableRenewalForHarness(t, hs)
 		hs.round()
 		hs.expectAcked("⚠️[到期] AWS 将于 3 天后（2026-10-10）到期")
@@ -553,8 +553,8 @@ func TestReconcileRenewalReminders(t *testing.T) {
 
 	t.Run("only the newest due reminder is caught up and a cleared key is silent", func(t *testing.T) {
 		hs := newReconcileHarness(t, shanghaiTime(2026, 10, 1, 10, 0, 0))
-		hs.addNode("jcloud", "JCloud", "")
-		setNodeExpiry(t, hs, "jcloud", "2026-10-15", "")
+		hs.addNode("node-f", "NodeF", "")
+		setNodeExpiry(t, hs, "node-f", "2026-10-15", "")
 		enableRenewalForHarness(t, hs, 1, 3, 7)
 		hs.round()
 		hs.at(shanghaiTime(2026, 10, 8, 9, 0, 0))
@@ -562,12 +562,12 @@ func TestReconcileRenewalReminders(t *testing.T) {
 		hs.at(shanghaiTime(2026, 10, 13, 9, 0, 0))
 		hs.expectAcked("⚠️[到期] JCloud 将于 7 天后（2026-10-15）到期", "⚠️[到期] JCloud 将于 2 天后（2026-10-15）到期")
 		permanent := true
-		if _, err := hs.store.UpdateAdminNode(hs.ctx, "jcloud", AdminNodeUpdateRequest{ExpiryPermanent: &permanent}); err != nil {
+		if _, err := hs.store.UpdateAdminNode(hs.ctx, "node-f", AdminNodeUpdateRequest{ExpiryPermanent: &permanent}); err != nil {
 			t.Fatalf("set permanent: %v", err)
 		}
 		hs.at(shanghaiTime(2026, 10, 14, 9, 0, 0))
 		hs.expectAcked("⚠️[到期] JCloud 将于 7 天后（2026-10-15）到期", "⚠️[到期] JCloud 将于 2 天后（2026-10-15）到期")
-		assertStateRow(t, hs, "jcloud", notificationKindRenewal, func(row notificationStateRow) bool {
+		assertStateRow(t, hs, "node-f", notificationKindRenewal, func(row notificationStateRow) bool {
 			return row.Notified == ""
 		}, "cleared key recorded silently")
 	})

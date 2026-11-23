@@ -72,23 +72,23 @@ func TestNotificationSeedFromLegacyOutbox(t *testing.T) {
 		t.Fatalf("create disabled channel: %v", err)
 	}
 	for _, node := range []struct{ id, name string }{
-		{"tarek", "Tarek"}, {"alibaba", "Alibaba"}, {"flaky", "Flaky"}, {"rebound", "Rebound"},
+		{"node-h", "NodeH"}, {"node-b", "NodeB"}, {"flaky", "Flaky"}, {"rebound", "Rebound"},
 		{"failedonly", "FailedOnly"}, {"untouched", "Untouched"}, {"cpu", "CpuNode"}, {"cpuok", "CpuOk"},
 		{"r-yesterday", "RYesterday"}, {"r-today-marked", "RTodayMarked"}, {"r-today", "RToday"},
 	} {
 		hs.addNode(node.id, node.name, "203.0.113.70")
 	}
-	alibabaLastSeen := shanghaiTime(2026, 10, 6, 20, 33, 27).Unix()
-	hs.setLiveness("alibaba", "offline", alibabaLastSeen)
-	hs.setLiveness("tarek", "online", now.Unix()-2)
+	nodeBLastSeen := shanghaiTime(2026, 10, 6, 20, 33, 27).Unix()
+	hs.setLiveness("node-b", "offline", nodeBLastSeen)
+	hs.setLiveness("node-h", "online", now.Unix()-2)
 
-	// Tarek: newest delivered row is online; the later canceled outcome-unknown
+	// NodeH: newest delivered row is online; the later canceled outcome-unknown
 	// offline row (production row 339) does not count.
-	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "tarek", eventType: "node_offline", prevStatus: "online", status: "offline", eventTS: shanghaiTime(2026, 10, 2, 16, 34, 8), state: "delivered"})
-	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "tarek", eventType: "node_offline", prevStatus: "offline", status: "online", eventTS: shanghaiTime(2026, 10, 2, 16, 34, 20), state: "delivered"})
-	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "tarek", eventType: "node_offline", prevStatus: "online", status: "offline", eventTS: shanghaiTime(2026, 10, 8, 3, 43, 28), state: "canceled", lastError: "delivery outcome unknown; superseded by newer status"})
-	// Alibaba: delivered offline and still offline -> incident from last_seen_at.
-	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "alibaba", eventType: "node_offline", prevStatus: "online", status: "offline", eventTS: shanghaiTime(2026, 10, 6, 20, 34, 28), state: "delivered"})
+	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "node-h", eventType: "node_offline", prevStatus: "online", status: "offline", eventTS: shanghaiTime(2026, 10, 2, 16, 34, 8), state: "delivered"})
+	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "node-h", eventType: "node_offline", prevStatus: "offline", status: "online", eventTS: shanghaiTime(2026, 10, 2, 16, 34, 20), state: "delivered"})
+	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "node-h", eventType: "node_offline", prevStatus: "online", status: "offline", eventTS: shanghaiTime(2026, 10, 8, 3, 43, 28), state: "canceled", lastError: "delivery outcome unknown; superseded by newer status"})
+	// NodeB: delivered offline and still offline -> incident from last_seen_at.
+	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "node-b", eventType: "node_offline", prevStatus: "online", status: "offline", eventTS: shanghaiTime(2026, 10, 6, 20, 34, 28), state: "delivered"})
 	// Flaky: delivered offline, now online (its recovery was never delivered)
 	// -> notified offline with incident from the delivered event time.
 	flakyOffline := shanghaiTime(2026, 10, 7, 9, 0, 0)
@@ -127,11 +127,11 @@ func TestNotificationSeedFromLegacyOutbox(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	assertStateRow(t, hs, "tarek", notificationKindLiveness, func(row notificationStateRow) bool {
+	assertStateRow(t, hs, "node-h", notificationKindLiveness, func(row notificationStateRow) bool {
 		return row.Notified == livenessStateOnline && row.IncidentFrom == 0
 	}, "online (canceled outcome-unknown row ignored)")
-	assertStateRow(t, hs, "alibaba", notificationKindLiveness, func(row notificationStateRow) bool {
-		return row.Notified == livenessStateOffline && row.IncidentFrom == alibabaLastSeen
+	assertStateRow(t, hs, "node-b", notificationKindLiveness, func(row notificationStateRow) bool {
+		return row.Notified == livenessStateOffline && row.IncidentFrom == nodeBLastSeen
 	}, "offline with incident_from = last_seen_at")
 	assertStateRow(t, hs, "flaky", notificationKindLiveness, func(row notificationStateRow) bool {
 		return row.Notified == livenessStateOffline && row.IncidentFrom == flakyOffline.Unix()
@@ -153,7 +153,7 @@ func TestNotificationSeedFromLegacyOutbox(t *testing.T) {
 	if count := hs.stateCount("channel_id = 'off'"); count != 0 {
 		t.Fatalf("disabled channel got %d rows", count)
 	}
-	for _, nodeID := range []string{"tarek", "failedonly"} {
+	for _, nodeID := range []string{"node-h", "failedonly"} {
 		if _, ok := hs.state(nodeID, notificationKindResource); ok {
 			t.Fatalf("%s got a resource row without a delivered row", nodeID)
 		}
@@ -185,15 +185,15 @@ func TestNotificationSeedFromLegacyOutbox(t *testing.T) {
 // database and never again.
 func TestNotificationSeedRunsOnceThroughSchemaMigrations(t *testing.T) {
 	hs := newReconcileHarness(t, time.Now().UTC())
-	hs.addNode("alibaba", "Alibaba", "")
-	hs.setLiveness("alibaba", "offline", time.Now().UTC().Add(-time.Hour).Unix())
-	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "alibaba", eventType: "node_offline", prevStatus: "online", status: "offline", eventTS: time.Now().UTC().Add(-time.Hour), state: "delivered"})
+	hs.addNode("node-b", "NodeB", "")
+	hs.setLiveness("node-b", "offline", time.Now().UTC().Add(-time.Hour).Unix())
+	insertLegacyDelivery(t, hs, legacyDeliveryRow{nodeID: "node-b", eventType: "node_offline", prevStatus: "online", status: "offline", eventTS: time.Now().UTC().Add(-time.Hour), state: "delivered"})
 	// Simulate a v1.0.23 database: no reconcile state and no seed record.
 	if _, err := hs.store.db.ExecContext(hs.ctx, `DELETE FROM notification_states; DELETE FROM notification_log; DELETE FROM schema_migrations WHERE name = ?`, notificationReconcileSeedMigration); err != nil {
 		t.Fatalf("simulate legacy database: %v", err)
 	}
 	hs.reopenStore()
-	assertStateRow(t, hs, "alibaba", notificationKindLiveness, func(row notificationStateRow) bool {
+	assertStateRow(t, hs, "node-b", notificationKindLiveness, func(row notificationStateRow) bool {
 		return row.Notified == livenessStateOffline
 	}, "seeded on upgrade")
 	var recorded int
