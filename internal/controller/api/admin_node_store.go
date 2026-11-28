@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -24,7 +23,7 @@ func (s *sqliteAdminDomain) CreateAdminNode(ctx context.Context, create AdminNod
 		}
 		nodeID = generated
 	}
-	bootstrapCredential, err := randomAdminCredential()
+	bootstrapCredential, err := randomToken()
 	if err != nil {
 		return AdminNode{}, err
 	}
@@ -52,19 +51,11 @@ func (s *sqliteAdminDomain) CreateAdminNode(ctx context.Context, create AdminNod
 	}
 	defer func() { rollbackUnlessCommitted(tx) }()
 
-	result, err := tx.ExecContext(ctx, `
+	if err := execRequiringRows(ctx, tx, errNodeAlreadyExists, `
 		INSERT OR IGNORE INTO nodes (id, display_name, token_hash, install_token, status, country_code, region, expiry_date, expiry_permanent, billing_cycle, renewal_amount, renewal_currency, display_order, public_ipv4, public_ipv6, billing_mode, monthly_quota_bytes, monthly_reset_day, disabled, created_at, updated_at, last_seen_at)
 		VALUES (?, ?, ?, NULL, 'no_data', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-	`, nodeID, create.DisplayName, hashAgentToken(bootstrapCredential), nullIfEmpty(create.CountryCode), nullIfEmpty(create.Region), nullIfEmpty(create.ExpiryDate), sqliteBoolInt(create.ExpiryPermanent), nullIfEmpty(create.BillingCycle), renewalAmount, create.RenewalCurrency, create.DisplayOrder, nullIfEmpty(create.PublicIPv4), nullIfEmpty(create.PublicIPv6), create.BillingMode, quota, monthlyResetDay, disabled, now, now)
-	if err != nil {
+	`, nodeID, create.DisplayName, hashAgentToken(bootstrapCredential), nullIfEmpty(create.CountryCode), nullIfEmpty(create.Region), nullIfEmpty(create.ExpiryDate), sqliteBoolInt(create.ExpiryPermanent), nullIfEmpty(create.BillingCycle), renewalAmount, create.RenewalCurrency, create.DisplayOrder, nullIfEmpty(create.PublicIPv4), nullIfEmpty(create.PublicIPv6), create.BillingMode, quota, monthlyResetDay, disabled, now, now); err != nil {
 		return AdminNode{}, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return AdminNode{}, err
-	}
-	if affected == 0 {
-		return AdminNode{}, errNodeAlreadyExists
 	}
 	// An empty scope means "all servers", so those rules already cover the new
 	// node. Copy only rules with explicit scopes to preserve their restricted
@@ -185,14 +176,6 @@ func normalizeAdminNodeID(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
-}
-
-func randomAdminCredential() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 func randomHex(size int) (string, error) {

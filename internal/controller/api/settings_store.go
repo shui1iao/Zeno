@@ -39,10 +39,7 @@ type sqliteSettings struct {
 }
 
 func (s *sqliteSettings) queryReadDB() *sql.DB {
-	if s.readDB != nil {
-		return s.readDB
-	}
-	return s.db
+	return preferredReadDB(s.readDB, s.db)
 }
 
 func (s *sqliteSettings) PublicSettings(ctx context.Context) (SiteSettings, error) {
@@ -158,7 +155,7 @@ func (s *sqliteSettings) siteSettingsFromDB(ctx context.Context, targetDB *sql.D
 		settings.BackgroundURL = settings.DesktopBackgroundURL
 	}
 	if latest.Valid && latest.Int64 > 0 {
-		settings.UpdatedAt = time.Unix(latest.Int64, 0).UTC().Format(time.RFC3339)
+		settings.UpdatedAt = unixRFC3339(latest.Int64)
 	}
 	return settings, nil
 }

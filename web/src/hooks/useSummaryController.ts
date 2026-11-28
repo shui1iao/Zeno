@@ -3,6 +3,7 @@ import { fetchSummary, subscribeSummary, type SummaryData } from '../api/publicC
 import { detailHttpFallbackDelayMs } from '../lib/detailTiming'
 import { flushScheduledSummaryWrite, loadStoredSummary, scheduleRememberSummary } from '../lib/summaryCache'
 import { startResilientLiveData } from '../lib/resilientLive'
+import { sumValues } from '../lib/number'
 import type { HomeCardNode } from '../types'
 
 export type SummaryLoadState =
@@ -20,15 +21,11 @@ const homeRealtimeSnapshotIntervalMs = 2000
 const homeRealtimeSnapshotFrameToleranceMs = 150
 const homeRealtimeStartupSyncMs = 1000
 
-function sum(values: Array<number | null | undefined>): number {
-  return values.reduce<number>((total, value) => total + (value ?? 0), 0)
-}
-
 export function homeRealtimeSnapshotForNodes(nodes: HomeCardNode[]): HomeRealtimeSnapshot {
   return {
     nodes,
-    upSpeed: sum(nodes.map((node) => node.netOutSpeedBps)),
-    downSpeed: sum(nodes.map((node) => node.netInSpeedBps)),
+    upSpeed: sumValues(nodes.map((node) => node.netOutSpeedBps)),
+    downSpeed: sumValues(nodes.map((node) => node.netInSpeedBps)),
   }
 }
 

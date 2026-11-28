@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import type { HomeCardNode } from '../types'
-import { isOfflineStatus } from './ServerCard'
+import { nodeStatusLabels, nodeVisualStatus } from './ServerCard'
 
 function sameStatusMatrix(left?: ReadonlyArray<HomeCardNode>, right?: ReadonlyArray<HomeCardNode>): boolean {
   if (left === right) return true
@@ -14,13 +14,13 @@ const HomeStatusMatrix = memo(function HomeStatusMatrix({ nodes, onOpenNode }: {
   return (
     <span className="home-summary__matrix" role="group" aria-label="节点状态">
       {nodes.map((node) => {
-        const offline = isOfflineStatus(node.status)
-        const label = `${node.displayName} · ${offline ? '离线' : node.status === 'warning' ? '异常' : '在线'}`
+        const status = nodeVisualStatus(node.status)
+        const label = `${node.displayName} · ${nodeStatusLabels[status]}`
         return (
           <button
             key={node.id}
             type="button"
-            className={offline ? 'is-offline' : node.status === 'warning' ? 'is-warning' : undefined}
+            className={status === 'online' ? undefined : `is-${status}`}
             title={label}
             aria-label={label}
             onClick={() => onOpenNode?.(node.id)}

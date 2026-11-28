@@ -266,7 +266,7 @@ func (h *handler) handleAdminAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) handleAdminSettings(w http.ResponseWriter, r *http.Request) {
-	handleAdminReadMutation(h, w, r, http.MethodPatch, http.StatusOK, readAdminSettings, updateAdminSettings)
+	handleAdminReadMutation(h, w, r, http.MethodPatch, http.StatusOK, readAdminSettings, updateAdminSettings, nil)
 }
 
 func readAdminSettings(ctx context.Context, store adminStore) (AdminSettingsResponse, error) {
@@ -282,10 +282,14 @@ func updateAdminSettings(ctx context.Context, store adminStore, update AdminSett
 	return AdminSettingsResponse{Settings: settings}, err
 }
 
+// handleAdminReadMutation serves an admin collection: GET reads it and
+// mutationMethod applies one JSON request to it. afterMutation, when set, runs
+// only after a successful mutation and before the response is written.
 func handleAdminReadMutation[Request, ReadResponse, MutationResponse any](
 	h *handler, w http.ResponseWriter, r *http.Request, mutationMethod string, mutationStatus int,
 	read func(context.Context, adminStore) (ReadResponse, error),
 	mutate func(context.Context, adminStore, Request) (MutationResponse, error),
+	afterMutation func(context.Context),
 ) {
 	store, ok := h.authorizeAdminRequest(w, r)
 	if !ok {
@@ -309,113 +313,91 @@ func handleAdminReadMutation[Request, ReadResponse, MutationResponse any](
 			writeAdminError(w, err)
 			return
 		}
+		if afterMutation != nil {
+			afterMutation(r.Context())
+		}
 		writeJSON(w, mutationStatus, response)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
 }
 
-func handleAdminPatchResource[Request, Response any](
-	h *handler, w http.ResponseWriter, r *http.Request, pathPrefix string,
-	update func(context.Context, adminStore, string, Request) (Response, error),
-) {
-	path := strings.Trim(strings.TrimPrefix(r.URL.Path, pathPrefix), "/")
-	parts := strings.Split(path, "/")
+// adminResourcePathParts returns the slash-separated segments below prefix.
+func adminResourcePathParts(r *http.Request, prefix string) []string {
+	return strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, prefix), "/"), "/")
+}
+
+// adminSingleResourceID accepts exactly one non-empty segment and answers 404
+// for anything else.
+func adminSingleResourceID(w http.ResponseWriter, parts []string) (string, bool) {
 	if len(parts) != 1 || parts[0] == "" {
 		writeError(w, http.StatusNotFound, "not found")
-		return
+		return "", false
 	}
-	if r.Method != http.MethodPatch {
+	return parts[0], true
+}
+
+// adminResourceOps describes one addressable admin resource. update serves
+// PATCH; remove, when set, serves DELETE (otherwise only PATCH is allowed).
+// The after* hooks run only after the store call succeeded and before the
+// response is written.
+type adminResourceOps[Request, Response any] struct {
+	update      func(context.Context, adminStore, string, Request) (Response, error)
+	remove      func(context.Context, adminStore, string) error
+	afterUpdate func(context.Context, Request)
+	afterRemove func(context.Context)
+}
+
+func handleAdminResource[Request, Response any](h *handler, w http.ResponseWriter, r *http.Request, id string, ops adminResourceOps[Request, Response]) {
+	if r.Method != http.MethodPatch && (ops.remove == nil || r.Method != http.MethodDelete) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	store, ok := h.authorizeAdminRequest(w, r)
 	if !ok {
+		return
+	}
+	if r.Method == http.MethodDelete {
+		if err := ops.remove(r.Context(), store, id); err != nil {
+			writeAdminError(w, err)
+			return
+		}
+		if ops.afterRemove != nil {
+			ops.afterRemove(r.Context())
+		}
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	var request Request
 	if !decodeJSONBody(w, r, &request, adminJSONBodyLimit, true) {
 		return
 	}
-	response, err := update(r.Context(), store, parts[0], request)
+	response, err := ops.update(r.Context(), store, id, request)
 	if err != nil {
 		writeAdminError(w, err)
 		return
+	}
+	if ops.afterUpdate != nil {
+		ops.afterUpdate(r.Context(), request)
 	}
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (h *handler) handleAdminProbeTargets(w http.ResponseWriter, r *http.Request) {
-	store, ok := h.authorizeAdminRequest(w, r)
+func handleAdminPatchResource[Request, Response any](
+	h *handler, w http.ResponseWriter, r *http.Request, pathPrefix string,
+	update func(context.Context, adminStore, string, Request) (Response, error),
+) {
+	id, ok := adminSingleResourceID(w, adminResourcePathParts(r, pathPrefix))
 	if !ok {
 		return
 	}
-	switch r.Method {
-	case http.MethodGet:
-		targets, err := store.AdminProbeTargets(r.Context())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		writeJSON(w, http.StatusOK, AdminProbeTargetsResponse{Targets: targets})
-	case http.MethodPost:
-		var create AdminProbeTargetCreateRequest
-		if !decodeJSONBody(w, r, &create, adminJSONBodyLimit, true) {
-			return
-		}
-		target, err := store.CreateAdminProbeTarget(r.Context(), create)
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		h.notifyProbeConfigChanged(r.Context())
-		h.publishSummaryNowFresh(r.Context())
-		writeJSON(w, http.StatusCreated, AdminProbeTargetResponse{Target: target})
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-	}
+	handleAdminResource(h, w, r, id, adminResourceOps[Request, Response]{update: update})
 }
 
-func (h *handler) handleAdminProbeTargetResource(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/admin/v1/probe-targets/"), "/")
-	parts := strings.Split(path, "/")
-	if len(parts) != 1 || parts[0] == "" {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if r.Method != http.MethodPatch && r.Method != http.MethodDelete {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	store, ok := h.authorizeAdminRequest(w, r)
-	if !ok {
-		return
-	}
-	if r.Method == http.MethodDelete {
-		if err := store.DeleteAdminProbeTarget(r.Context(), parts[0]); err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		h.notifyProbeConfigChanged(r.Context())
-		h.publishSummaryNowFresh(r.Context())
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	var update AdminProbeTargetUpdateRequest
-	if !decodeJSONBody(w, r, &update, adminJSONBodyLimit, true) {
-		return
-	}
-	target, err := store.UpdateAdminProbeTarget(r.Context(), parts[0], update)
-	if err != nil {
-		writeAdminError(w, err)
-		return
-	}
-	h.notifyProbeConfigChanged(r.Context())
-	h.publishSummaryNowFresh(r.Context())
-	writeJSON(w, http.StatusOK, AdminProbeTargetResponse{Target: target})
-}
-
-func (h *handler) handleAdminProbeTargetReorder(w http.ResponseWriter, r *http.Request) {
+// handleAdminReorder serves a PATCH reorder endpoint. reorder is nil when the
+// configured store does not support ordering, which answers 404 once the
+// request is authorized.
+func handleAdminReorder[Request any](h *handler, w http.ResponseWriter, r *http.Request, reorder func(context.Context, Request) error, afterReorder func(context.Context)) {
 	if r.Method != http.MethodPatch {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -423,122 +405,127 @@ func (h *handler) handleAdminProbeTargetReorder(w http.ResponseWriter, r *http.R
 	if _, ok := h.authorizeAdminRequest(w, r); !ok {
 		return
 	}
-	store, ok := h.store.(adminProbeTargetOrderStore)
-	if !ok {
+	if reorder == nil {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	var request AdminProbeTargetReorderRequest
+	var request Request
 	if !decodeJSONBody(w, r, &request, adminJSONBodyLimit, true) {
 		return
 	}
-	if err := store.ReorderAdminProbeTargets(r.Context(), request); err != nil {
+	if err := reorder(r.Context(), request); err != nil {
 		writeAdminError(w, err)
 		return
 	}
-	h.notifyProbeConfigChanged(r.Context())
-	h.publishSummaryNowFresh(r.Context())
+	afterReorder(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *handler) handleAdminNodes(w http.ResponseWriter, r *http.Request) {
-	store, ok := h.authorizeAdminRequest(w, r)
+// publishProbeConfigAndSummary is the follow-up for every mutation that can
+// change an Agent's probe plan: wake the Agents, then refresh the summary.
+func (h *handler) publishProbeConfigAndSummary(ctx context.Context) {
+	h.notifyProbeConfigChanged(ctx)
+	h.publishSummaryNowFresh(ctx)
+}
+
+func (h *handler) handleAdminProbeTargets(w http.ResponseWriter, r *http.Request) {
+	handleAdminReadMutation(h, w, r, http.MethodPost, http.StatusCreated, readAdminProbeTargets, createAdminProbeTarget, h.publishProbeConfigAndSummary)
+}
+
+func readAdminProbeTargets(ctx context.Context, store adminStore) (AdminProbeTargetsResponse, error) {
+	targets, err := store.AdminProbeTargets(ctx)
+	return AdminProbeTargetsResponse{Targets: targets}, err
+}
+
+func createAdminProbeTarget(ctx context.Context, store adminStore, create AdminProbeTargetCreateRequest) (AdminProbeTargetResponse, error) {
+	target, err := store.CreateAdminProbeTarget(ctx, create)
+	return AdminProbeTargetResponse{Target: target}, err
+}
+
+func (h *handler) handleAdminProbeTargetResource(w http.ResponseWriter, r *http.Request) {
+	id, ok := adminSingleResourceID(w, adminResourcePathParts(r, "/api/admin/v1/probe-targets/"))
 	if !ok {
 		return
 	}
-	switch r.Method {
-	case http.MethodGet:
-		nodes, err := store.AdminNodes(r.Context())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		writeJSON(w, http.StatusOK, AdminNodesResponse{Nodes: nodes})
-	case http.MethodPost:
-		var create AdminNodeCreateRequest
-		if !decodeJSONBody(w, r, &create, adminJSONBodyLimit, true) {
-			return
-		}
-		node, err := store.CreateAdminNode(r.Context(), create)
-		if err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		h.publishSummaryNowFresh(r.Context())
-		writeJSON(w, http.StatusCreated, AdminNodeResponse{Node: node})
-	default:
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	handleAdminResource(h, w, r, id, adminResourceOps[AdminProbeTargetUpdateRequest, AdminProbeTargetResponse]{
+		update: updateAdminProbeTarget,
+		remove: deleteAdminProbeTarget,
+		afterUpdate: func(ctx context.Context, _ AdminProbeTargetUpdateRequest) {
+			h.publishProbeConfigAndSummary(ctx)
+		},
+		afterRemove: h.publishProbeConfigAndSummary,
+	})
+}
+
+func updateAdminProbeTarget(ctx context.Context, store adminStore, targetID string, update AdminProbeTargetUpdateRequest) (AdminProbeTargetResponse, error) {
+	target, err := store.UpdateAdminProbeTarget(ctx, targetID, update)
+	return AdminProbeTargetResponse{Target: target}, err
+}
+
+func deleteAdminProbeTarget(ctx context.Context, store adminStore, targetID string) error {
+	return store.DeleteAdminProbeTarget(ctx, targetID)
+}
+
+func (h *handler) handleAdminProbeTargetReorder(w http.ResponseWriter, r *http.Request) {
+	var reorder func(context.Context, AdminProbeTargetReorderRequest) error
+	if store, ok := h.store.(adminProbeTargetOrderStore); ok {
+		reorder = store.ReorderAdminProbeTargets
 	}
+	handleAdminReorder(h, w, r, reorder, h.publishProbeConfigAndSummary)
+}
+
+func (h *handler) handleAdminNodes(w http.ResponseWriter, r *http.Request) {
+	handleAdminReadMutation(h, w, r, http.MethodPost, http.StatusCreated, readAdminNodes, createAdminNode, h.publishSummaryNowFresh)
+}
+
+func readAdminNodes(ctx context.Context, store adminStore) (AdminNodesResponse, error) {
+	nodes, err := store.AdminNodes(ctx)
+	return AdminNodesResponse{Nodes: nodes}, err
+}
+
+func createAdminNode(ctx context.Context, store adminStore, create AdminNodeCreateRequest) (AdminNodeResponse, error) {
+	node, err := store.CreateAdminNode(ctx, create)
+	return AdminNodeResponse{Node: node}, err
 }
 
 func (h *handler) handleAdminNodeResource(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/admin/v1/nodes/"), "/")
-	parts := strings.Split(path, "/")
+	parts := adminResourcePathParts(r, "/api/admin/v1/nodes/")
 	if len(parts) == 2 && parts[1] == "install-command" {
 		h.handleAdminNodeInstallCommand(w, r, parts[0])
 		return
 	}
-	if len(parts) != 1 || parts[0] == "" {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if r.Method != http.MethodPatch && r.Method != http.MethodDelete {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	store, ok := h.authorizeAdminRequest(w, r)
+	nodeID, ok := adminSingleResourceID(w, parts)
 	if !ok {
 		return
 	}
-	nodeID := parts[0]
-	if r.Method == http.MethodDelete {
-		if err := store.DeleteAdminNode(r.Context(), nodeID); err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		h.publishSummaryNowFresh(r.Context())
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	var update AdminNodeUpdateRequest
-	if !decodeJSONBody(w, r, &update, adminJSONBodyLimit, true) {
-		return
-	}
-	node, err := store.UpdateAdminNode(r.Context(), nodeID, update)
-	if err != nil {
-		writeAdminError(w, err)
-		return
-	}
-	if update.ProbeTargetIDs != nil {
-		h.notifyProbeConfigChanged(r.Context())
-	}
-	h.publishSummaryNowFresh(r.Context())
-	writeJSON(w, http.StatusOK, AdminNodeResponse{Node: node})
+	handleAdminResource(h, w, r, nodeID, adminResourceOps[AdminNodeUpdateRequest, AdminNodeResponse]{
+		update: updateAdminNode,
+		remove: deleteAdminNode,
+		afterUpdate: func(ctx context.Context, update AdminNodeUpdateRequest) {
+			if update.ProbeTargetIDs != nil {
+				h.notifyProbeConfigChanged(ctx)
+			}
+			h.publishSummaryNowFresh(ctx)
+		},
+		afterRemove: h.publishSummaryNowFresh,
+	})
+}
+
+func updateAdminNode(ctx context.Context, store adminStore, nodeID string, update AdminNodeUpdateRequest) (AdminNodeResponse, error) {
+	node, err := store.UpdateAdminNode(ctx, nodeID, update)
+	return AdminNodeResponse{Node: node}, err
+}
+
+func deleteAdminNode(ctx context.Context, store adminStore, nodeID string) error {
+	return store.DeleteAdminNode(ctx, nodeID)
 }
 
 func (h *handler) handleAdminNodeReorder(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPatch {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
+	var reorder func(context.Context, AdminNodeReorderRequest) error
+	if store, ok := h.store.(adminNodeOrderStore); ok {
+		reorder = store.ReorderAdminNodes
 	}
-	if _, ok := h.authorizeAdminRequest(w, r); !ok {
-		return
-	}
-	store, ok := h.store.(adminNodeOrderStore)
-	if !ok {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	var request AdminNodeReorderRequest
-	if !decodeJSONBody(w, r, &request, adminJSONBodyLimit, true) {
-		return
-	}
-	if err := store.ReorderAdminNodes(r.Context(), request); err != nil {
-		writeAdminError(w, err)
-		return
-	}
-	h.publishSummaryNowFresh(r.Context())
-	w.WriteHeader(http.StatusNoContent)
+	handleAdminReorder(h, w, r, reorder, h.publishSummaryNowFresh)
 }
 
 func (h *handler) handleAdminNodeInstallCommand(w http.ResponseWriter, r *http.Request, nodeID string) {
@@ -635,45 +622,16 @@ func (h *handler) authorizeAdminRequest(w http.ResponseWriter, r *http.Request) 
 			return nil, false
 		}
 	}
-	if authStore, ok := h.store.(adminAuthStore); ok {
-		authorized, err := authStore.AuthorizeAdminSession(r.Context(), provided)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return nil, false
-		}
-		if authorized {
-			return store, true
-		}
-		configured, err := authStore.AdminAccountConfigured(r.Context())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
-			return nil, false
-		}
-		if configured {
-			writeError(w, http.StatusUnauthorized, "unauthorized")
-			return nil, false
-		}
-	}
-	if !h.bootstrapAdminPasswordMatches(provided) {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+	if !h.authorizeAdminCredential(w, r, provided) {
 		return nil, false
 	}
 	return store, true
 }
 
-// authorizeExtendedHistoryRequest protects the heavier 7-day and 30-day
-// history endpoints while allowing the public dashboard to pass its existing
-// opaque admin session in X-Admin-Token.
-func (h *handler) authorizeExtendedHistoryRequest(w http.ResponseWriter, r *http.Request) bool {
-	if h.adminPasswordHash == "" {
-		writeError(w, http.StatusNotFound, "not found")
-		return false
-	}
-	provided, cookieAuth := adminRequestToken(r)
-	if cookieAuth && !h.requestUsesHTTPS(r) {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return false
-	}
+// authorizeAdminCredential checks an admin session token (or, while no admin
+// account is configured, the bootstrap password) and writes the 401/500
+// response itself when the credential is rejected.
+func (h *handler) authorizeAdminCredential(w http.ResponseWriter, r *http.Request, provided string) bool {
 	if authStore, ok := h.store.(adminAuthStore); ok {
 		authorized, err := authStore.AuthorizeAdminSession(r.Context(), provided)
 		if err != nil {
@@ -698,6 +656,22 @@ func (h *handler) authorizeExtendedHistoryRequest(w http.ResponseWriter, r *http
 	}
 	writeError(w, http.StatusUnauthorized, "unauthorized")
 	return false
+}
+
+// authorizeExtendedHistoryRequest protects the heavier 7-day and 30-day
+// history endpoints while allowing the public dashboard to pass its existing
+// opaque admin session in X-Admin-Token.
+func (h *handler) authorizeExtendedHistoryRequest(w http.ResponseWriter, r *http.Request) bool {
+	if h.adminPasswordHash == "" {
+		writeError(w, http.StatusNotFound, "not found")
+		return false
+	}
+	provided, cookieAuth := adminRequestToken(r)
+	if cookieAuth && !h.requestUsesHTTPS(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	return h.authorizeAdminCredential(w, r, provided)
 }
 
 func (h *handler) bootstrapAdminPasswordMatches(password string) bool {

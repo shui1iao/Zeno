@@ -1,9 +1,9 @@
-import { type FormEvent, useState } from 'react'
+import { useState } from 'react'
 import type { AdminAlertRuleUpdateInput, AdminNotificationChannelCreateInput, AdminNotificationChannelUpdateInput } from '../../api/adminClient'
 import { runMaybePromise } from '../../lib/maybePromise'
 import type { AdminAlertRule, AdminNode, AdminNotificationChannel } from '../../types'
 import { AdminExpandedCheckList } from './AdminFields'
-import { AdminCredentialField, AdminDeleteConfirmModal, AdminModalPresence, AdminFormSection, AdminModal, AdminActionFooter, AdminRowActions, AdminWorkspaceHeading } from './AdminPrimitives'
+import { AdminCredentialField, AdminModalPresence, AdminFormModal, AdminFormSection, AdminListHead, AdminModal, AdminRowActions, AdminWorkspaceHeading, adminErrorText, useAdminDeleteConfirm, useAdminSubmit } from './AdminPrimitives'
 import { formatAlertRuleNote, formatAlertRuleScope, formatRenewalDayOption, normalizeRenewalDays, parseNonNegativeInt, parsePercentage, renewalDayOptions } from './adminOperationalModel'
 import type { AdminNotificationsWorkspaceProps, MaybePromise } from './adminOperationalTypes'
 
@@ -44,16 +44,12 @@ function AdminAlertRulesSection({ rules, nodes, onUpdate }: { rules: AdminAlertR
 }
 
 function AdminAlertRuleList({ rules, onEdit, onUpdate }: { rules: AdminAlertRule[]; onEdit: (rule: AdminAlertRule) => void; onUpdate: (ruleId: string, input: AdminAlertRuleUpdateInput) => MaybePromise }) {
-  const [pendingDelete, setPendingDelete] = useState<AdminAlertRule | null>(null)
+  const { requestDelete, deleteModal } = useAdminDeleteConfirm<AdminAlertRule>({ entityLabel: '通知类型', getName: (rule) => rule.name, onConfirm: (rule) => onUpdate(rule.id, { enabled: false }), hint: '删除后可重新添加。' })
 
   return (
     <>
       <div className="admin-list admin-alert-rule-list" role="list" aria-label="通知类型列表">
-        <div className="admin-list-head" aria-hidden="true">
-          <span>通知类型</span>
-          <span>状态</span>
-          <span>操作</span>
-        </div>
+        <AdminListHead columns={['通知类型', '状态', '操作']} />
         {rules.map((rule) => (
           <div className="admin-list-row" role="listitem" key={rule.id}>
             <div className="admin-list-main">
@@ -65,21 +61,12 @@ function AdminAlertRuleList({ rules, onEdit, onUpdate }: { rules: AdminAlertRule
               entityLabel="通知类型"
               name={rule.name}
               onEdit={() => onEdit(rule)}
-              onDelete={() => setPendingDelete(rule)}
+              onDelete={() => requestDelete(rule)}
             />
           </div>
         ))}
       </div>
-      <AdminModalPresence>{pendingDelete && (
-        <AdminDeleteConfirmModal
-          title="删除通知类型"
-          subjectName={pendingDelete.name}
-          confirmLabel="删除通知类型"
-          hint="删除后可重新添加。"
-          onClose={() => setPendingDelete(null)}
-          onConfirm={() => onUpdate(pendingDelete.id, { enabled: false })}
-        />
-      )}</AdminModalPresence>
+      {deleteModal}
     </>
   )
 }
@@ -93,7 +80,7 @@ function AdminAlertRuleAddModal({ rules, nodes, onAdd, onClose }: { rules: Admin
     setFormError(null)
     runMaybePromise(() => onAdd(ruleId, { enabled: true }))
       .then(() => onClose())
-      .catch((error: unknown) => setFormError(error instanceof Error ? error.message : '添加失败'))
+      .catch((error: unknown) => setFormError(adminErrorText(error, '添加失败')))
       .finally(() => setSubmittingRuleId(null))
   }
   return (
@@ -120,39 +107,39 @@ function AdminAlertRuleAddModal({ rules, nodes, onAdd, onClose }: { rules: Admin
 }
 
 function AdminAlertRuleEditModal({ rule, nodes, onUpdate, onClose }: { rule: AdminAlertRule; nodes: AdminNode[]; onUpdate: (ruleId: string, input: AdminAlertRuleUpdateInput) => MaybePromise; onClose: () => void }) {
-  const [submitting, setSubmitting] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
+  const { submitting, error: formError, submit } = useAdminSubmit()
   const initialScopeNodeIds = rule.scopeNodeIds.length === 0 ? nodes.map((node) => node.id) : rule.scopeNodeIds
   const [scopeNodeIds, setScopeNodeIds] = useState(initialScopeNodeIds)
   const isRenewalRule = rule.metric === 'expiry_days'
   const [renewalDays, setRenewalDays] = useState(() => normalizeRenewalDays(rule.renewalDays, rule.threshold))
   const isResourceRule = rule.category === 'resource' && rule.thresholdUnit === '%'
   const supportsDuration = !isRenewalRule
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (submitting) return
-    const formData = new FormData(event.currentTarget)
+  const handleSubmit = (form: HTMLFormElement) => {
+    const formData = new FormData(form)
     const resourceThreshold = isResourceRule ? parsePercentage(String(formData.get('rule-threshold-percent') ?? '')) : null
     const durationSec = supportsDuration ? parseNonNegativeInt(String(formData.get('rule-duration-sec') ?? '')) : null
     const persistedScopeNodeIds = scopeNodeIds.length === nodes.length ? [] : scopeNodeIds
-    setSubmitting(true)
-    setFormError(null)
-    runMaybePromise(() => onUpdate(rule.id, {
+    void submit(() => onUpdate(rule.id, {
       enabled: formData.get('rule-enabled') === 'on',
       ...(isRenewalRule ? { renewalDays } : {}),
       ...(isResourceRule && resourceThreshold !== null ? { threshold: resourceThreshold } : {}),
       ...(supportsDuration && durationSec !== null ? { durationSec } : {}),
       scopeNodeIds: persistedScopeNodeIds,
-    }))
-      .then(() => onClose())
-      .catch((error: unknown) => setFormError(error instanceof Error ? error.message : '保存失败'))
-      .finally(() => setSubmitting(false))
+    }), '保存失败', onClose)
   }
 
   return (
-    <AdminModal title="编辑通知类型" className="admin-alert-rule-modal" closeDisabled={submitting} onClose={onClose}>
-      <form className="admin-alert-rule-edit-form admin-node-edit-form is-sectioned" aria-label={`${rule.name} 通知类型编辑`} aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
-        <div className="admin-modal-scroll">
+    <AdminFormModal
+      title="编辑通知类型"
+      modalClassName="admin-alert-rule-modal"
+      formClassName="admin-alert-rule-edit-form"
+      formLabel={`${rule.name} 通知类型编辑`}
+      submitting={submitting}
+      error={formError}
+      onClose={onClose}
+      onSubmit={handleSubmit}
+      footer={<button type="submit" disabled={submitting}>{submitting ? '保存中…' : '保存通知类型'}</button>}
+    >
           <AdminFormSection title="通知设置">
             <div className="admin-form-grid admin-alert-rule-settings-grid">
               {isRenewalRule && (
@@ -197,12 +184,7 @@ function AdminAlertRuleEditModal({ rule, nodes, onUpdate, onClose }: { rule: Adm
               />
             </AdminFormSection>
           )}
-        </div>
-        <AdminActionFooter error={formError}>
-          <button type="submit" disabled={submitting}>{submitting ? '保存中…' : '保存通知类型'}</button>
-        </AdminActionFooter>
-      </form>
-    </AdminModal>
+    </AdminFormModal>
   )
 }
 
@@ -247,7 +229,7 @@ export function AdminNotificationsWorkspace({ channels, rules, nodes, onChannelC
 }
 
 function AdminNotificationChannelList({ channels, onDelete, onEdit, onUpdate, onTest }: { channels: AdminNotificationChannel[]; onDelete: (channelId: string) => MaybePromise; onEdit: (channel: AdminNotificationChannel) => void; onUpdate?: (channelId: string, input: AdminNotificationChannelUpdateInput) => MaybePromise; onTest?: (channelId: string) => void }) {
-  const [pendingDelete, setPendingDelete] = useState<AdminNotificationChannel | null>(null)
+  const { requestDelete, deleteModal } = useAdminDeleteConfirm<AdminNotificationChannel>({ entityLabel: '通知渠道', getName: (channel) => channel.name, onConfirm: (channel) => onDelete(channel.id) })
   const [togglingId, setTogglingId] = useState<string | null>(null)
   const [toggleError, setToggleError] = useState<string | null>(null)
   const toggleChannel = (channel: AdminNotificationChannel) => {
@@ -255,18 +237,14 @@ function AdminNotificationChannelList({ channels, onDelete, onEdit, onUpdate, on
     setTogglingId(channel.id)
     setToggleError(null)
     runMaybePromise(() => onUpdate(channel.id, { enabled: !channel.enabled }))
-      .catch((error: unknown) => setToggleError(error instanceof Error ? error.message : '更新失败'))
+      .catch((error: unknown) => setToggleError(adminErrorText(error, '更新失败')))
       .finally(() => setTogglingId(null))
   }
 
   return (
     <>
       <div className="admin-list admin-notification-list" role="list" aria-label="通知渠道列表">
-        <div className="admin-list-head" aria-hidden="true">
-          <span>渠道</span>
-          <span>状态</span>
-          <span>操作</span>
-        </div>
+        <AdminListHead columns={['渠道', '状态', '操作']} />
         {channels.map((channel) => (
           <div className="admin-list-row" role="listitem" key={channel.id}>
             <div className="admin-list-main">
@@ -296,22 +274,14 @@ function AdminNotificationChannelList({ channels, onDelete, onEdit, onUpdate, on
                 actionEntityLabel="渠道"
                 name={channel.name}
                 onEdit={() => onEdit(channel)}
-                onDelete={() => setPendingDelete(channel)}
+                onDelete={() => requestDelete(channel)}
               />
             </div>
           </div>
         ))}
         {toggleError && <div className="admin-inline-note is-error" role="alert">{toggleError}</div>}
       </div>
-      <AdminModalPresence>{pendingDelete && (
-        <AdminDeleteConfirmModal
-          title="删除通知渠道"
-          subjectName={pendingDelete.name}
-          confirmLabel="删除通知渠道"
-          onClose={() => setPendingDelete(null)}
-          onConfirm={() => onDelete(pendingDelete.id)}
-        />
-      )}</AdminModalPresence>
+      {deleteModal}
     </>
   )
 }
@@ -325,34 +295,39 @@ type AdminNotificationChannelModalProps =
   | { mode: 'edit'; channel: AdminNotificationChannel; onUpdate: (channelId: string, input: AdminNotificationChannelUpdateInput) => MaybePromise; onTest: (channelId: string) => void; onClose: () => void }
 
 function AdminNotificationChannelModal(props: AdminNotificationChannelModalProps) {
-  const [submitting, setSubmitting] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
+  const { submitting, error: formError, submit } = useAdminSubmit()
   const editing = props.mode === 'edit'
   const channel = editing ? props.channel : null
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (submitting) return
-    const formData = new FormData(event.currentTarget)
+  const handleSubmit = (form: HTMLFormElement) => {
+    const formData = new FormData(form)
     const name = String(formData.get('channel-name') ?? '').trim()
     const destination = String(formData.get('channel-destination') ?? '').trim()
     const credential = String(formData.get('channel-credential') ?? '').trim()
     if (name === '' || (!editing && (destination === '' || credential === ''))) return
-    setSubmitting(true)
-    setFormError(null)
     const enabled = formData.get('channel-enabled') === 'on'
-    const submit = props.mode === 'edit'
+    const action = props.mode === 'edit'
       ? () => props.onUpdate(props.channel.id, { name, ...(destination !== '' ? { destination } : {}), ...(credential !== '' ? { credential } : {}), enabled })
       : () => props.onCreate({ name, destination, credential, enabled })
-    runMaybePromise(submit)
-      .then(props.onClose)
-      .catch((error: unknown) => setFormError(error instanceof Error ? error.message : (editing ? '保存失败' : '添加失败')))
-      .finally(() => setSubmitting(false))
+    void submit(action, editing ? '保存失败' : '添加失败', props.onClose)
   }
 
   return (
-    <AdminModal title={editing ? '编辑通知渠道' : '添加通知渠道'} className="admin-notification-channel-modal" closeDisabled={submitting} onClose={props.onClose}>
-      <form className={`admin-notification-${editing ? 'edit' : 'create'}-form admin-node-edit-form is-sectioned`} aria-label={editing ? '编辑通知渠道' : '添加通知渠道'} aria-busy={submitting} inert={submitting ? true : undefined} onSubmit={handleSubmit}>
-        <div className="admin-modal-scroll">
+    <AdminFormModal
+      title={editing ? '编辑通知渠道' : '添加通知渠道'}
+      modalClassName="admin-notification-channel-modal"
+      formClassName={`admin-notification-${editing ? 'edit' : 'create'}-form`}
+      formLabel={editing ? '编辑通知渠道' : '添加通知渠道'}
+      submitting={submitting}
+      error={formError}
+      onClose={props.onClose}
+      onSubmit={handleSubmit}
+      footer={(
+        <>
+          {props.mode === 'edit' && <button type="button" onClick={() => props.onTest(props.channel.id)}>测试发送</button>}
+          <button type="submit" disabled={submitting}>{submitting ? (editing ? '保存中…' : '添加中…') : (editing ? '保存通知渠道' : '添加通知渠道')}</button>
+        </>
+      )}
+    >
           <AdminFormSection title="渠道配置">
             <div className="admin-form-grid admin-channel-form-grid">
               <label>
@@ -370,13 +345,7 @@ function AdminNotificationChannelModal(props: AdminNotificationChannelModalProps
               </label>
             </div>
           </AdminFormSection>
-        </div>
-        <AdminActionFooter error={formError}>
-          {props.mode === 'edit' && <button type="button" onClick={() => props.onTest(props.channel.id)}>测试发送</button>}
-          <button type="submit" disabled={submitting}>{submitting ? (editing ? '保存中…' : '添加中…') : (editing ? '保存通知渠道' : '添加通知渠道')}</button>
-        </AdminActionFooter>
-      </form>
-    </AdminModal>
+    </AdminFormModal>
   )
 }
 

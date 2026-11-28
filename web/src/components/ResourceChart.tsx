@@ -1,12 +1,13 @@
 import { useMemo, type MouseEvent as ReactMouseEvent } from 'react'
-import { formatClock } from '../lib/format'
 import {
   downsampleSegments,
+  formatAxisTime,
   formatResourceAxis,
   nearestIndex,
   resourceDomain,
   sampleCadenceMs,
   splitSegments,
+  svgPointerX,
   type ResourceScale,
   type TimedValue,
 } from '../lib/resourceChart'
@@ -30,14 +31,6 @@ export interface ResourceChartExtraRow {
 
 function linePath(segment: TimedValue[], x: (t: number) => number, y: (v: number) => number): string {
   return segment.map((point, index) => `${index === 0 ? 'M' : 'L'}${x(point.t).toFixed(2)} ${y(point.v).toFixed(2)}`).join(' ')
-}
-
-function formatAxisTime(timestamp: number, spanMs: number): string {
-  const date = new Date(timestamp)
-  if (Number.isNaN(date.getTime())) return '--:--'
-  const time = formatClock(date)
-  if (spanMs > 36 * 3_600_000) return `${date.getMonth() + 1}/${date.getDate()} ${time}`
-  return time
 }
 
 interface ResourceMiniChartProps {
@@ -100,13 +93,9 @@ export function ResourceMiniChart({ label, scale, series, timestamps, hoverIndex
   const hoverIndex = rawHoverIndex !== null && rawHoverIndex < timestamps.length ? rawHoverIndex : null
   const hoverX = hoverIndex !== null ? x(timestamps[hoverIndex]) : null
   const handleHover = (event: ReactMouseEvent<SVGRectElement>) => {
-    const svg = event.currentTarget.ownerSVGElement
-    const ctm = svg?.getScreenCTM()
-    if (!svg || !ctm || timestamps.length === 0) return
-    const point = svg.createSVGPoint()
-    point.x = event.clientX
-    point.y = event.clientY
-    const svgX = point.matrixTransform(ctm.inverse()).x
+    if (timestamps.length === 0) return
+    const svgX = svgPointerX(event.currentTarget, event.clientX, event.clientY)
+    if (svgX === null) return
     const ratio = plotWidth > 0 ? Math.max(0, Math.min(1, (svgX - plotLeft) / plotWidth)) : 1
     onHoverIndexChange(nearestIndex(timestamps, start + ratio * span))
   }

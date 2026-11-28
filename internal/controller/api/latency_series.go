@@ -248,7 +248,7 @@ func latencyTimestampMillis(value string) int64 {
 
 func latencyTimestampString(value int64) string {
 	if value <= 0 {
-		return time.Unix(0, 0).UTC().Format(time.RFC3339)
+		return unixRFC3339(0)
 	}
 	return time.UnixMilli(value).UTC().Format(time.RFC3339)
 }

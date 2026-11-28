@@ -1667,6 +1667,8 @@ svg { display: block; }
   .home-summary__metric-value > span { font-size: 10.5px; }
   .home-summary__matrix { display: none; }
   .server-list-row.is-header { display: none; }
+  /* The header is hidden here, so the first node row must not draw a divider at the panel top. */
+  .server-list-row.is-header + .server-list-row { border-top: 0; }
   .server-list-row {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-areas: "node node node net" "cpu mem disk traffic";

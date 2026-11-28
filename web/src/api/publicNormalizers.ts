@@ -1,5 +1,6 @@
 import type { AdminSettings, HomeCardNode, LatencyPoint, ServiceTarget, StatePoint } from '../types'
 import { normalizeCurrencyRates } from '../lib/currency'
+import { finiteOrNull } from '../lib/number'
 import type { ApiLatencyPoint, ApiLatencyResponse, ApiLatencySeries, ApiLatencySummary, ApiNode, ApiServiceTarget, ApiSettings, ApiStatePoint, ApiStateResponse, NodeLatencyData, NodeStateData, SummaryData, ApiSummaryResponse } from './apiTypes'
 
 export function normalizeSettings(input: ApiSettings): AdminSettings {
@@ -302,6 +303,5 @@ export function normalizeNodeStatePoints(input: ApiStateResponse): StatePoint[] 
 
 export function stateSeriesValue(values: Array<number | null> | null | undefined, index: number): number | null {
   if (!values || index < 0 || index >= values.length) return null
-  const value = values[index]
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  return finiteOrNull(values[index])
 }

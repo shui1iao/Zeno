@@ -1,11 +1,14 @@
 import { memo, useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import type { HomeCardNode, HourlyLatencyPoint, ServerCardTheme } from '../types'
-import { formatLatency } from '../lib/format'
-import { convertCurrencyAmount, formatCurrencyAmount, normalizeCurrencyCode, normalizeCurrencyRates, type CurrencyCode, type CurrencyRates } from '../lib/currency'
+import { byteUnits, formatCalendarDate, formatLatency, scaleBytes } from '../lib/format'
+import { convertCurrencyAmount, formatCycleAmount, normalizeCurrencyCode, normalizeCurrencyRates, type CurrencyCode, type CurrencyRates } from '../lib/currency'
+import { isFiniteNumber, isPositiveFinite } from '../lib/number'
 import { ServerFlag } from './ServerFlag'
-import { expiryBadge, isOfflineStatus } from '../lib/nodeHealth'
+import { packetLossTone, TriangleAlertIcon } from './icons'
+import { expiryBadge, isOfflineStatus, nodeStatusLabels, nodeVisualStatus } from '../lib/nodeHealth'
 
-export { expiryBadge, formatLatency, isOfflineStatus, normalizeCurrencyRates, ServerFlag }
+// Re-exported so the lazy list/detail chunks reach these through the entry chunk.
+export { expiryBadge, formatLatency, nodeStatusLabels, nodeVisualStatus, ServerFlag }
 
 export interface ServerCardProps {
   node: HomeCardNode
@@ -37,49 +40,38 @@ export function osKindFor(os: string | undefined): string {
 }
 
 export function osAssetFor(os: string | undefined): string {
-  const value = os?.trim().toLowerCase() ?? ''
-  if (value.includes('darwin') || value.includes('macos') || value.includes('mac os')) return osAsset.darwin
-  if (value.includes('windows')) return osAsset.windows
-  if (value.includes('debian')) return osAsset.debian
-  if (value.includes('ubuntu')) return osAsset.ubuntu
-  if (value.includes('centos')) return osAsset.centos
-  if (value.includes('alpine')) return osAsset.alpine
-  if (value.includes('linux')) return osAsset.linux
-  return osAsset.unknown
+  return osAsset[osKindFor(os)]
 }
 
-export function ratio(used: number | null | undefined, total: number | null | undefined): number | null {
+function ratio(used: number | null | undefined, total: number | null | undefined): number | null {
   if (used === null || used === undefined || total === null || total === undefined || total <= 0) return null
   return (used / total) * 100
 }
 
-export function clampPercent(value: number | null | undefined): number {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 0
-  return Math.max(0, Math.min(100, value))
+function clampPercent(value: number | null | undefined): number {
+  return isFiniteNumber(value) ? Math.max(0, Math.min(100, value)) : 0
 }
 
-export function barTone(value: number | null | undefined): 'good' | 'warning' | 'danger' | 'empty' {
+function barTone(value: number | null | undefined): 'good' | 'warning' | 'danger' | 'empty' {
   if (value === null || value === undefined) return 'empty'
   if (value > 90) return 'danger'
   if (value > 60) return 'warning'
   return 'good'
 }
 
-export function formatKulinBytes(value: number | null | undefined, options: { total?: boolean } = {}): string {
+function formatKulinBytes(value: number | null | undefined, options: { total?: boolean } = {}): string {
   if (value === null || value === undefined) return '--'
   if (value === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  let size = Math.abs(value)
-  let unit = 0
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024
-    unit += 1
-  }
+  const { size, power } = scaleBytes(Math.abs(value))
   const signed = value < 0 ? -size : size
-  const digits = unit === 0 ? 0 : 2
-  const amount = signed.toFixed(digits)
+  const amount = signed.toFixed(power === 0 ? 0 : 2)
   // Configured totals (quota, memory, disk) are usually whole numbers: 50 TB, not 50.00 TB.
-  return `${options.total ? amount.replace(/\.00$/, '') : amount} ${units[unit]}`
+  return `${options.total ? amount.replace(/\.00$/, '') : amount} ${byteUnits[power]}`
+}
+
+/** "1.20 GB / 4 GB": the configured total drops a trailing ".00". */
+function formatUsedOfTotal(used: number | null | undefined, total: number | null | undefined): string {
+  return `${formatKulinBytes(used)} / ${formatKulinBytes(total, { total: true })}`
 }
 
 export function formatRate(value: number | null | undefined): string {
@@ -87,19 +79,21 @@ export function formatRate(value: number | null | undefined): string {
   return `${formatKulinBytes(value)}/s`
 }
 
-function formatCores(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '-- Cores'
-  return `${value.toFixed(value % 1 === 0 ? 0 : 1)} ${value === 1 ? 'Core' : 'Cores'}`
+const plainCoreLabel = { singular: 'Core', plural: 'Cores' }
+
+/** "2 Cores", "1 Core", "1.5 Cores"; the detail page passes Virtual/Physical labels. */
+export function formatCoreCount(value: number | null | undefined, label: { singular: string; plural: string } = plainCoreLabel): string {
+  if (value === null || value === undefined) return `-- ${label.plural}`
+  return `${value.toFixed(Number.isInteger(value) ? 0 : 1)} ${value === 1 ? label.singular : label.plural}`
 }
 
-export function formatUsage(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '--'
-  return value.toFixed(2)
+export function formatUsagePercent(value: number | null | undefined): string {
+  if (value === null || value === undefined) return '--%'
+  return `${value.toFixed(2)}%`
 }
 
 function formatLoad(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '--'
-  return value.toFixed(2)
+  return isFiniteNumber(value) ? value.toFixed(2) : '--'
 }
 
 export function formatOnlineDays(uptimeSeconds: number | null | undefined): string {
@@ -107,7 +101,7 @@ export function formatOnlineDays(uptimeSeconds: number | null | undefined): stri
   return `在线 ${Math.floor(uptimeSeconds / 86400)} 天`
 }
 
-export function normalizeLoss(value: number | null | undefined): string {
+function normalizeLoss(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   return `${value.toFixed(2)}%`
 }
@@ -115,7 +109,7 @@ export function normalizeLoss(value: number | null | undefined): string {
 type HistoryKind = 'latency' | 'loss'
 type HistoryTone = 'good' | 'warning' | 'danger' | 'empty'
 
-export function normalizeHourlyHistory(history: HourlyLatencyPoint[] | null | undefined): HourlyLatencyPoint[] {
+function normalizeHourlyHistory(history: HourlyLatencyPoint[] | null | undefined): HourlyLatencyPoint[] {
   const values = (history ?? []).slice(-12)
   return [
     ...Array.from({ length: Math.max(0, 12 - values.length) }, () => ({ startedAt: '', latencyMs: null, lossPercent: null })),
@@ -124,23 +118,17 @@ export function normalizeHourlyHistory(history: HourlyLatencyPoint[] | null | un
 }
 
 export function historyTone(kind: HistoryKind, value: number | null | undefined): HistoryTone {
-  if (value === null || value === undefined || !Number.isFinite(value)) return 'empty'
-  if (kind === 'latency') {
-    if (value < 0) return 'empty'
-    if (value >= 200) return 'danger'
-    if (value >= 100) return 'warning'
-    return 'good'
-  }
-  if (value >= 5) return 'danger'
-  if (value >= 1) return 'warning'
+  if (kind === 'loss') return packetLossTone(value)
+  if (!isFiniteNumber(value) || value < 0) return 'empty'
+  if (value >= 200) return 'danger'
+  if (value >= 100) return 'warning'
   return 'good'
 }
 
 function historyTimestamp(value: string): string {
   const parsed = new Date(value)
   if (value.trim() === '' || Number.isNaN(parsed.getTime())) return '暂无数据'
-  const pad = (part: number) => String(part).padStart(2, '0')
-  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:00`
+  return `${formatCalendarDate(parsed)} ${String(parsed.getHours()).padStart(2, '0')}:00`
 }
 
 export function historyTitle(kind: HistoryKind, point: HourlyLatencyPoint): string {
@@ -159,23 +147,33 @@ export function historyStripSummary(kind: HistoryKind, label: string, points: Ho
   return `${label}近 12 小时：正常 ${counts.good} 小时，偏高 ${counts.warning} 小时，严重 ${counts.danger} 小时，无数据 ${counts.empty} 小时`
 }
 
-function formatTrafficLabel(): string {
-  return '流量'
-}
-
-export function expiryMetricValue(expiry: ReturnType<typeof expiryBadge>): string {
+function expiryMetricValue(expiry: ReturnType<typeof expiryBadge>): string {
   if (!expiry) return '--'
   return expiry.text.replace(/^余\s*/, '')
 }
 
-export function formatRenewalCost(amount: number | null | undefined, currency: string | null | undefined, cycle: string | null | undefined, displayCurrency: CurrencyCode, exchangeRates: CurrencyRates): string | null {
-  if (amount === null || amount === undefined || !Number.isFinite(amount) || amount <= 0) return null
+function formatRenewalCost(amount: number | null | undefined, currency: string | null | undefined, cycle: string | null | undefined, displayCurrency: CurrencyCode, exchangeRates: CurrencyRates): string | null {
+  if (!isPositiveFinite(amount)) return null
   const sourceCurrency = normalizeCurrencyCode(currency)
   const converted = convertCurrencyAmount(amount, sourceCurrency, displayCurrency, exchangeRates)
-  const shownCurrency = converted === null ? sourceCurrency : displayCurrency
-  const shownAmount = converted ?? amount
-  const cycleText = (cycle ?? '').trim()
-  return `${formatCurrencyAmount(shownAmount, shownCurrency, { spaced: true })}${cycleText ? ` / ${cycleText}` : ''}`
+  return formatCycleAmount(converted ?? amount, converted === null ? sourceCurrency : displayCurrency, cycle)
+}
+
+/** Readings the home card and the list row both derive from one node. */
+export function nodeCardReadings(node: HomeCardNode, displayCurrency: CurrencyCode, inputExchangeRates: CurrencyRates) {
+  const latency = node.latencySummary
+  return {
+    memoryPercent: ratio(node.memoryUsedBytes, node.memoryTotalBytes),
+    diskPercent: ratio(node.diskUsedBytes, node.diskTotalBytes),
+    trafficPercent: ratio(node.monthlyBillableBytes, node.monthlyQuotaBytes),
+    trafficText: formatUsedOfTotal(node.monthlyBillableBytes, node.monthlyQuotaBytes),
+    latency,
+    lossText: latency ? normalizeLoss(latency.lossPercent) : '--',
+    hourlyHistory: normalizeHourlyHistory(latency?.hourlyHistory),
+    expiryText: expiryMetricValue(expiryBadge(node.expiryLabel)),
+    billingText: formatRenewalCost(node.renewalAmount, node.renewalCurrency, node.billingCycle, displayCurrency, normalizeCurrencyRates(inputExchangeRates)) ?? '--',
+    offline: isOfflineStatus(node.status),
+  }
 }
 
 function sameHourlyHistory(left?: HourlyLatencyPoint[], right?: HourlyLatencyPoint[]): boolean {
@@ -236,17 +234,9 @@ export function sameServerCardProps(prev: ServerCardProps, next: ServerCardProps
 }
 
 export const ServerCard = memo(function ServerCard({ node, serverCardTheme = 'classic', displayCurrency = 'CNY', exchangeRates: inputExchangeRates = { CNY: 1 }, onOpen, onIntent }: ServerCardProps) {
-  const memoryPercent = ratio(node.memoryUsedBytes, node.memoryTotalBytes)
-  const diskPercent = ratio(node.diskUsedBytes, node.diskTotalBytes)
-  const trafficPercent = ratio(node.monthlyBillableBytes, node.monthlyQuotaBytes)
-  const latency = node.latencySummary
-  const hourlyHistory = normalizeHourlyHistory(latency?.hourlyHistory)
-  const expiry = expiryBadge(node.expiryLabel)
-  const exchangeRates = normalizeCurrencyRates(inputExchangeRates)
-  const renewalCost = formatRenewalCost(node.renewalAmount, node.renewalCurrency, node.billingCycle, displayCurrency, exchangeRates)
-  const isOfflineCard = isOfflineStatus(node.status)
+  const { memoryPercent, diskPercent, trafficPercent, trafficText, latency, lossText, hourlyHistory, expiryText, billingText, offline: isOfflineCard } = nodeCardReadings(node, displayCurrency, inputExchangeRates)
   const capsule = serverCardTheme === 'capsule'
-  const capsuleStatus = isOfflineCard ? 'status-offline' : node.status === 'warning' ? 'status-warning' : 'status-online'
+  const capsuleStatus = `status-${nodeVisualStatus(node.status)}`
   const openHandlers = useNodeOpenHandlers(node.id, onOpen, onIntent)
 
   return (
@@ -271,7 +261,7 @@ export const ServerCard = memo(function ServerCard({ node, serverCardTheme = 'cl
 
       {!capsule && (
         <section className="node-specs" aria-label={`${node.displayName} specs`}>
-          <SpecIcon kind="cpu" label={formatCores(node.cpuCores)} />
+          <SpecIcon kind="cpu" label={formatCoreCount(node.cpuCores)} />
           <SpecIcon kind="memory" label={formatKulinBytes(node.memoryTotalBytes, { total: true })} />
           <SpecIcon kind="disk" label={formatKulinBytes(node.diskTotalBytes, { total: true })} />
         </section>
@@ -279,18 +269,18 @@ export const ServerCard = memo(function ServerCard({ node, serverCardTheme = 'cl
 
       <section className="node-usage" aria-label={`${node.displayName} usage`}>
         <div className="node-usage-grid">
-          <UsageBar tone="cpu" label="CPU" valueText={`${formatUsage(node.cpuPercent)}%`} percent={node.cpuPercent} detail={capsule ? `${formatCores(node.cpuCores)} · ${formatLoad(node.load1)} / ${formatLoad(node.load5)} / ${formatLoad(node.load15)}` : undefined} />
-          <UsageBar tone="memory" label="内存" valueText={`${formatUsage(memoryPercent)}%`} percent={memoryPercent} detail={capsule ? `${formatKulinBytes(node.memoryUsedBytes)} / ${formatKulinBytes(node.memoryTotalBytes, { total: true })}` : undefined} />
-          <UsageBar tone="disk" label="存储" valueText={`${formatUsage(diskPercent)}%`} percent={diskPercent} detail={capsule ? `${formatKulinBytes(node.diskUsedBytes)} / ${formatKulinBytes(node.diskTotalBytes, { total: true })}` : undefined} />
-          <UsageBar tone="traffic" label={formatTrafficLabel()} valueText={capsule ? `${formatUsage(trafficPercent)}%` : `${formatKulinBytes(node.monthlyBillableBytes)} / ${formatKulinBytes(node.monthlyQuotaBytes, { total: true })}`} percent={trafficPercent} detail={capsule ? `${formatKulinBytes(node.monthlyBillableBytes)} / ${formatKulinBytes(node.monthlyQuotaBytes, { total: true })}` : undefined} />
+          <UsageBar tone="cpu" label="CPU" valueText={formatUsagePercent(node.cpuPercent)} percent={node.cpuPercent} detail={capsule ? `${formatCoreCount(node.cpuCores)} · ${formatLoad(node.load1)} / ${formatLoad(node.load5)} / ${formatLoad(node.load15)}` : undefined} />
+          <UsageBar tone="memory" label="内存" valueText={formatUsagePercent(memoryPercent)} percent={memoryPercent} detail={capsule ? formatUsedOfTotal(node.memoryUsedBytes, node.memoryTotalBytes) : undefined} />
+          <UsageBar tone="disk" label="存储" valueText={formatUsagePercent(diskPercent)} percent={diskPercent} detail={capsule ? formatUsedOfTotal(node.diskUsedBytes, node.diskTotalBytes) : undefined} />
+          <UsageBar tone="traffic" label="流量" valueText={capsule ? formatUsagePercent(trafficPercent) : trafficText} percent={trafficPercent} detail={capsule ? trafficText : undefined} />
         </div>
         <section className="node-footer-grid" aria-label={`${node.displayName} network, billing, and health`}>
           <Metric tone="up" icon={<UploadIcon />} label="上传" value={formatRate(node.netOutSpeedBps)} />
           <Metric tone="down" icon={<DownloadIcon />} label="下载" value={formatRate(node.netInSpeedBps)} />
-          <Metric tone="expiry" icon={<CalendarIcon />} label="剩余" value={expiryMetricValue(expiry)} />
-          <Metric tone="billing" icon={<WalletIcon />} label="账单" value={renewalCost ?? '--'} />
+          <Metric tone="expiry" icon={<CalendarIcon />} label="剩余" value={expiryText} />
+          <Metric tone="billing" icon={<WalletIcon />} label="账单" value={billingText} />
           <HealthHistoryRow kind="latency" icon={<ActivityIcon />} label="延迟" value={formatLatency(latency?.avgMs)} points={hourlyHistory} />
-          <HealthHistoryRow kind="loss" icon={<TriangleAlertIcon />} label="丢包率" value={latency ? normalizeLoss(latency.lossPercent) : '--'} points={hourlyHistory} />
+          <HealthHistoryRow kind="loss" icon={<TriangleAlertIcon />} label="丢包率" value={lossText} points={hourlyHistory} />
         </section>
       </section>
     </div>
@@ -339,9 +329,18 @@ export function useNodeOpenHandlers(nodeId: string, onOpen?: (nodeId: string) =>
 
 type ResourceTone = 'cpu' | 'memory' | 'disk' | 'traffic'
 
-function UsageBar({ tone, label, valueText, percent, detail }: { tone: ResourceTone; label: string; valueText: string; percent: number | null | undefined; detail?: string }) {
+/** Usage progress bar shared by the home card rows and the list meters. */
+export function UsageTrack({ label, percent }: { label: string; percent: number | null | undefined }) {
   const value = clampPercent(percent)
   const fillPercent = value > 0 && value < 2.8 ? 2.8 : value
+  return (
+    <div className="usage-track" role="progressbar" aria-label={`${label} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}>
+      <div className={`usage-fill is-${barTone(percent)}`} style={{ transform: `translateX(-${100 - fillPercent}%)` }} />
+    </div>
+  )
+}
+
+function UsageBar({ tone, label, valueText, percent, detail }: { tone: ResourceTone; label: string; valueText: string; percent: number | null | undefined; detail?: string }) {
   return (
     <div className={`usage-row usage-row--${tone}`}>
       <div className="usage-row__meta">
@@ -350,9 +349,7 @@ function UsageBar({ tone, label, valueText, percent, detail }: { tone: ResourceT
         </span>
         <strong>{valueText}</strong>
       </div>
-      <div className="usage-track" role="progressbar" aria-label={`${label} usage`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={value}>
-        <div className={`usage-fill is-${barTone(percent)}`} style={{ transform: `translateX(-${100 - fillPercent}%)` }} />
-      </div>
+      <UsageTrack label={label} percent={percent} />
       {detail !== undefined && <span className="usage-row__detail">{detail}</span>}
     </div>
   )
@@ -360,14 +357,20 @@ function UsageBar({ tone, label, valueText, percent, detail }: { tone: ResourceT
 
 type MetricTone = 'up' | 'down' | 'expiry' | 'billing'
 
+function MetricHeading({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <span className="metric-heading">
+      <span className="metric-icon">{icon}</span>
+      <span className="metric-label">{label}</span>
+    </span>
+  )
+}
+
 function HealthHistoryRow({ kind, icon, label, value, points }: { kind: HistoryKind; icon: ReactNode; label: string; value: string; points: HourlyLatencyPoint[] }) {
   return (
     <div className={`node-health-metric health-${kind}`}>
       <div className="health-history-heading">
-        <span className="metric-heading">
-          <span className="metric-icon">{icon}</span>
-          <span className="metric-label">{label}</span>
-        </span>
+        <MetricHeading icon={icon} label={label} />
         <strong>{value}</strong>
       </div>
       <div className="health-history-strip" role="img" aria-label={historyStripSummary(kind, label, points)}>
@@ -389,10 +392,7 @@ function HealthHistoryRow({ kind, icon, label, value, points }: { kind: HistoryK
 function Metric({ tone, icon, label, value }: { tone: MetricTone; icon: ReactNode; label: string; value: string }) {
   return (
     <div className={`node-metric metric-${tone}`}>
-      <span className="metric-heading">
-        <span className="metric-icon">{icon}</span>
-        <span className="metric-label">{label}</span>
-      </span>
+      <MetricHeading icon={icon} label={label} />
       <strong>{value}</strong>
     </div>
   )
@@ -435,16 +435,6 @@ function ActivityIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
-    </svg>
-  )
-}
-
-function TriangleAlertIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
-      <path d="M12 9v4" />
-      <path d="M12 17h.01" />
     </svg>
   )
 }

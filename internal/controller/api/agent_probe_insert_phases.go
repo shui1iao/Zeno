@@ -67,7 +67,7 @@ func checkAgentProbeConfigVersion(ctx context.Context, tx *sql.Tx, configVersion
 // each round can be matched without a per-round query inside the write
 // transaction.
 func loadEnabledProbeTargetsByID(ctx context.Context, tx *sql.Tx, nodeID string) (map[string]ProbeTarget, error) {
-	targets, err := enabledProbeTargetsTx(ctx, tx, nodeID)
+	targets, err := enabledProbeTargetsQuery(ctx, tx, nodeID)
 	if err != nil {
 		return nil, err
 	}

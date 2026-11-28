@@ -37,6 +37,29 @@ func nodeOfflineAfterFromSeconds(seconds sql.NullInt64) time.Duration {
 	return time.Duration(seconds.Int64) * time.Second
 }
 
+// preferredReadDB returns the read pool when one is attached and otherwise the
+// single writer connection, which is what every store's reads fall back to
+// before OpenSQLiteStore attaches the pool (and for in-memory databases).
+func preferredReadDB(readDB, writeDB *sql.DB) *sql.DB {
+	if readDB != nil {
+		return readDB
+	}
+	return writeDB
+}
+
+// nullableValue binds an optional value, storing SQL NULL for nil.
+func nullableValue[T any](value *T) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+// unixRFC3339 formats a Unix timestamp in seconds as UTC RFC 3339.
+func unixRFC3339(seconds int64) string {
+	return time.Unix(seconds, 0).UTC().Format(time.RFC3339)
+}
+
 func nullIfEmpty(value string) any {
 	if value == "" {
 		return nil
@@ -237,7 +260,7 @@ func unixStringPtr(value sql.NullInt64) *string {
 	if !value.Valid || value.Int64 <= 0 {
 		return nil
 	}
-	formatted := time.Unix(value.Int64, 0).UTC().Format(time.RFC3339)
+	formatted := unixRFC3339(value.Int64)
 	return &formatted
 }
 
@@ -245,7 +268,7 @@ func unixStringOr(value sql.NullInt64, fallback time.Time) string {
 	if !value.Valid || value.Int64 <= 0 {
 		return fallback.UTC().Format(time.RFC3339)
 	}
-	return time.Unix(value.Int64, 0).UTC().Format(time.RFC3339)
+	return unixRFC3339(value.Int64)
 }
 
 func floatPtr(value sql.NullFloat64) *float64 {

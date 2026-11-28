@@ -195,7 +195,7 @@ func (s *sqliteReadQueries) latestHomeLatencySummaries(ctx context.Context) (map
 			MedianMS:    medianPtr,
 			AvgMS:       avgPtr,
 			LossPercent: floatPtr(loss),
-			UpdatedAt:   time.Unix(ts, 0).UTC().Format(time.RFC3339),
+			UpdatedAt:   unixRFC3339(ts),
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -276,7 +276,7 @@ func (s *sqliteReadQueries) homeLatencyHourlyHistory(ctx context.Context, now ti
 			raw[nodeID] = map[int64]HourlyLatencyPoint{}
 		}
 		raw[nodeID][bucketTS] = HourlyLatencyPoint{
-			StartedAt:   time.Unix(bucketTS, 0).UTC().Format(time.RFC3339),
+			StartedAt:   unixRFC3339(bucketTS),
 			LatencyMS:   floatPtr(latency),
 			LossPercent: floatPtr(loss),
 		}
@@ -337,7 +337,7 @@ func (s *sqliteReadQueries) latestLatencySummariesByNode(ctx context.Context) (m
 			MedianMS:    floatPtr(median),
 			AvgMS:       floatPtr(avg),
 			LossPercent: floatPtr(loss),
-			UpdatedAt:   time.Unix(ts, 0).UTC().Format(time.RFC3339),
+			UpdatedAt:   unixRFC3339(ts),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -465,7 +465,7 @@ func (s *sqliteReadQueries) populateServiceTargetLatencySummaries(ctx context.Co
 		targets[index].AvgMS = floatPtr(avg)
 		targets[index].LossPercent = floatPtr(loss)
 		if ts.Valid {
-			targets[index].UpdatedAt = time.Unix(ts.Int64, 0).UTC().Format(time.RFC3339)
+			targets[index].UpdatedAt = unixRFC3339(ts.Int64)
 		}
 	}
 	return rows.Err()

@@ -61,7 +61,7 @@ func scanStateHistoryPointInto(rows *sql.Rows, slab *floatSlab) (StatePoint, err
 		return StatePoint{}, err
 	}
 	return StatePoint{
-		TS:                 time.Unix(ts, 0).UTC().Format(time.RFC3339),
+		TS:                 unixRFC3339(ts),
 		TSUnix:             ts,
 		CPUPercent:         slab.nullFloatPtr(cpuPercent),
 		Load1:              slab.nullFloatPtr(load1),

@@ -44,12 +44,12 @@ func (s *sqliteAdminDomain) SeedPreviewData(ctx context.Context, options Preview
 	if options.AgentToken != "" {
 		tokenHash = hashAgentToken(options.AgentToken)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { rollbackUnlessCommitted(tx) }()
+	return withSQLiteTx(ctx, s.db, func(tx *sql.Tx) error {
+		return seedPreviewDataTx(ctx, tx, nodeID, displayName, countryCode, tokenHash, now)
+	})
+}
 
+func seedPreviewDataTx(ctx context.Context, tx *sql.Tx, nodeID, displayName, countryCode, tokenHash string, now int64) error {
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO nodes (id, display_name, token_hash, install_token, status, country_code, billing_mode, monthly_quota_bytes, monthly_reset_day, disabled, created_at, updated_at, last_seen_at)
 		VALUES (?, ?, ?, NULL, 'no_data', ?, 'both', ?, 1, 0, ?, ?, NULL)
@@ -101,7 +101,7 @@ func (s *sqliteAdminDomain) SeedPreviewData(ctx context.Context, options Preview
 				interval_sec = excluded.interval_sec,
 				display_order = CASE WHEN probe_targets.display_order = 0 THEN excluded.display_order ELSE probe_targets.display_order END,
 				updated_at = excluded.updated_at
-		`, target.ID, target.Name, target.Type, target.Address, nullablePort(target.Port), target.Count, target.TimeoutMS, target.IntervalSec, target.DisplayOrder, now, now); err != nil {
+		`, target.ID, target.Name, target.Type, target.Address, nullableValue(target.Port), target.Count, target.TimeoutMS, target.IntervalSec, target.DisplayOrder, now, now); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -112,15 +112,7 @@ func (s *sqliteAdminDomain) SeedPreviewData(ctx context.Context, options Preview
 			return err
 		}
 	}
-	if err := bumpProbeConfigVersionTx(ctx, tx); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	tx = nil
-	return nil
+	return bumpProbeConfigVersionTx(ctx, tx)
 }
 
 func DefaultPreviewProbeTargets() []ProbeTarget {
@@ -151,10 +143,7 @@ func previewTarget(id, name, address string, port int) ProbeTarget {
 }
 
 func (s *sqliteAgentDomain) queryReadDB() *sql.DB {
-	if s.readDB != nil {
-		return s.readDB
-	}
-	return s.db
+	return preferredReadDB(s.readDB, s.db)
 }
 
 func (s *sqliteAgentDomain) EnabledProbeTargets(ctx context.Context, nodeID string) ([]ProbeTarget, error) {
@@ -171,7 +160,7 @@ func (s *sqliteAgentDomain) EnabledProbeTargetsWithConfigVersion(ctx context.Con
 	if err := tx.QueryRowContext(ctx, `SELECT version FROM probe_config_meta WHERE id = 1`).Scan(&version); err != nil {
 		return nil, 0, err
 	}
-	targets, err := enabledProbeTargetsTx(ctx, tx, nodeID)
+	targets, err := enabledProbeTargetsQuery(ctx, tx, nodeID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -180,10 +169,6 @@ func (s *sqliteAgentDomain) EnabledProbeTargetsWithConfigVersion(ctx context.Con
 	}
 	tx = nil
 	return targets, version, nil
-}
-
-func enabledProbeTargetsTx(ctx context.Context, tx *sql.Tx, nodeID string) ([]ProbeTarget, error) {
-	return enabledProbeTargetsQuery(ctx, tx, nodeID)
 }
 
 type probeTargetQueryer interface {
@@ -220,10 +205,7 @@ func enabledProbeTargetsQuery(ctx context.Context, queryer probeTargetQueryer, n
 		if err := rows.Scan(&target.ID, &target.Name, &target.Type, &target.Address, &port, &target.Count, &target.TimeoutMS, &target.IntervalSec); err != nil {
 			return nil, err
 		}
-		if port.Valid {
-			p := int(port.Int64)
-			target.Port = &p
-		}
+		target.Port = intSQLPtr(port)
 		target = normalizeProbeTargetForExecution(target)
 		targetBudgetMS := probeTargetRoundBudgetMS(target.Count, target.TimeoutMS)
 		if len(targets) >= maxProbeTargetsPerNode || nodeBudgetMS+targetBudgetMS > maxProbeNodeRoundBudgetMS {
@@ -236,17 +218,4 @@ func enabledProbeTargetsQuery(ctx context.Context, queryer probeTargetQueryer, n
 		return nil, err
 	}
 	return targets, nil
-}
-
-func nullablePort(port *int) any {
-	if port == nil {
-		return nil
-	}
-	return *port
-}
-
-func rollbackUnlessCommitted(tx *sql.Tx) {
-	if tx != nil {
-		_ = tx.Rollback()
-	}
 }

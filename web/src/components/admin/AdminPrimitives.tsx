@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, createContext, useContext, useEffect, useId, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, Fragment, createContext, useContext, useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { OverlayOwnerContext, useOverlayPresence } from '../../hooks/useOverlayPresence'
 import { focusWithoutScroll, overlayTabStops } from '../../lib/overlayFocus'
@@ -95,20 +95,39 @@ export function AdminActionFooter({ children, error, className = '' }: { childre
   )
 }
 
-export function AdminDeleteConfirmModal({ title, subjectName, confirmLabel, hint = '删除后无法恢复。', onConfirm, onClose }: { title: string; subjectName: string; confirmLabel: string; hint?: string; onConfirm: () => MaybePromise; onClose: () => void }) {
+export function adminErrorText(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
+
+/** Shared submit state for every admin form: one in-flight request, its error, and the busy flag. */
+export function useAdminSubmit() {
   const [submitting, setSubmitting] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const submit = <T,>(action: () => MaybePromise<T>, fallbackError: string, onSuccess?: (value: T) => void): Promise<T | undefined> => {
+    setSubmitting(true)
+    setError(null)
+    return runMaybePromise(action)
+      .then((value) => {
+        onSuccess?.(value)
+        return value
+      })
+      .catch((caught: unknown) => {
+        setError(adminErrorText(caught, fallbackError))
+        return undefined
+      })
+      .finally(() => setSubmitting(false))
+  }
+  return { submitting, error, setError, submit }
+}
+
+export function AdminDeleteConfirmModal({ title, subjectName, confirmLabel, hint = '删除后无法恢复。', onConfirm, onClose }: { title: string; subjectName: string; confirmLabel: string; hint?: string; onConfirm: () => MaybePromise; onClose: () => void }) {
+  const { submitting, error: formError, submit } = useAdminSubmit()
   const descriptionId = useId()
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (submitting) return
-    setSubmitting(true)
-    setFormError(null)
-    runMaybePromise(onConfirm)
-      .then(onClose)
-      .catch((error: unknown) => setFormError(error instanceof Error ? error.message : '删除失败'))
-      .finally(() => setSubmitting(false))
+    void submit(onConfirm, '删除失败', onClose)
   }
 
   return (
@@ -129,6 +148,73 @@ export function AdminDeleteConfirmModal({ title, subjectName, confirmLabel, hint
         </AdminActionFooter>
       </form>
     </AdminModal>
+  )
+}
+
+/** Pending-delete state plus its confirm modal, shared by every admin list. */
+export function useAdminDeleteConfirm<T>({ entityLabel, getName, onConfirm, hint }: { entityLabel: string; getName: (item: T) => string; onConfirm: (item: T) => MaybePromise; hint?: string }) {
+  const [pending, setPending] = useState<T | null>(null)
+  const modal = (
+    <AdminModalPresence>{pending !== null && (
+      <AdminDeleteConfirmModal
+        title={`删除${entityLabel}`}
+        subjectName={getName(pending)}
+        confirmLabel={`删除${entityLabel}`}
+        hint={hint}
+        onClose={() => setPending(null)}
+        onConfirm={() => onConfirm(pending)}
+      />
+    )}</AdminModalPresence>
+  )
+  return { requestDelete: setPending as (item: T) => void, deleteModal: modal }
+}
+
+/** Modal + sectioned form + sticky footer used by every add/edit dialog. */
+export function AdminFormModal({ title, formLabel, formClassName, modalClassName, submitting, error, onClose, onSubmit, footer, children }: { title: string; formLabel: string; formClassName?: string; modalClassName?: string; submitting: boolean; error?: string | null; onClose: () => void; onSubmit: (form: HTMLFormElement) => void; footer: ReactNode; children: ReactNode }) {
+  return (
+    <AdminModal title={title} className={modalClassName} closeDisabled={submitting} onClose={onClose}>
+      <form
+        className={[formClassName, 'admin-node-edit-form', 'is-sectioned'].filter(Boolean).join(' ')}
+        aria-label={formLabel}
+        aria-busy={submitting}
+        inert={submitting ? true : undefined}
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!submitting) onSubmit(event.currentTarget)
+        }}
+      >
+        <div className="admin-modal-scroll">{children}</div>
+        <AdminActionFooter error={error}>{footer}</AdminActionFooter>
+      </form>
+    </AdminModal>
+  )
+}
+
+/** Section shell shared by the server and latency-monitor workspaces: heading,
+    add button, empty state, list, and the add/edit modals. */
+export function AdminListWorkspace<T extends { id: string }>({ className, ariaLabel, title, addLabel, emptyText, items, renderList, renderCreate, renderEdit }: { className: string; ariaLabel: string; title: string; addLabel: string; emptyText: string; items: T[]; renderList: (onEdit: (itemId: string) => void) => ReactNode; renderCreate: (onClose: () => void) => ReactNode; renderEdit: (item: T, onClose: () => void) => ReactNode }) {
+  const [creating, setCreating] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const editing = editingId ? items.find((item) => item.id === editingId) : undefined
+  return (
+    <section className={`${className} admin-workspace-panel`} aria-label={ariaLabel}>
+      <AdminWorkspaceHeading
+        title={title}
+        actions={<button className="admin-primary-action" type="button" onClick={() => setCreating(true)}>{addLabel}</button>}
+      />
+      {items.length === 0 && <div className="admin-state-card">{emptyText}</div>}
+      {items.length > 0 && renderList(setEditingId)}
+      <AdminModalPresence>{creating && renderCreate(() => setCreating(false))}</AdminModalPresence>
+      <AdminModalPresence>{editing && <Fragment key={editing.id}>{renderEdit(editing, () => setEditingId(null))}</Fragment>}</AdminModalPresence>
+    </section>
+  )
+}
+
+export function AdminListHead({ columns }: { columns: string[] }) {
+  return (
+    <div className="admin-list-head" aria-hidden="true">
+      {columns.map((column) => <span key={column}>{column}</span>)}
+    </div>
   )
 }
 

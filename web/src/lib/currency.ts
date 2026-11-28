@@ -1,3 +1,5 @@
+import { isPositiveFinite } from './number'
+
 export const homeCurrencyStorageKey = 'zeno_home_currency'
 
 export const currencyOptions = [
@@ -50,7 +52,7 @@ export function normalizeCurrencyRates(value: unknown): CurrencyRates {
 }
 
 export function availableCurrencyOptions(rates: CurrencyRates) {
-  return currencyOptions.filter((option) => !hiddenDisplayCurrencyCodes.has(option.value) && (option.value === 'CNY' || validRate(rates[option.value])))
+  return currencyOptions.filter((option) => !hiddenDisplayCurrencyCodes.has(option.value) && (option.value === 'CNY' || isPositiveFinite(rates[option.value])))
 }
 
 export function storedHomeCurrency(storage: Pick<Storage, 'getItem'> | null | undefined = typeof window === 'undefined' ? null : window.localStorage): CurrencyCode {
@@ -69,16 +71,12 @@ export function rememberHomeCurrency(currency: CurrencyCode, storage: Pick<Stora
   }
 }
 
-function validRate(value: number | null | undefined): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-}
-
 export function convertCurrencyAmount(amount: number | null | undefined, source: string | null | undefined, target: CurrencyCode, rates: CurrencyRates): number | null {
   if (amount === null || amount === undefined || !Number.isFinite(amount) || amount < 0) return null
   const sourceCurrency = normalizeCurrencyCode(source)
   const sourceRate = rates[sourceCurrency]
   const targetRate = rates[target]
-  if (!validRate(sourceRate) || !validRate(targetRate)) return null
+  if (!isPositiveFinite(sourceRate) || !isPositiveFinite(targetRate)) return null
   return amount * sourceRate / targetRate
 }
 
@@ -100,4 +98,10 @@ export function formatCurrencyAmount(value: number | null | undefined, currency:
   const fixed = normalized.toFixed(2)
   const amount = options.fixed ? fixed : fixed.replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
   return `${currencySymbols[currency]}${options.spaced ? ' ' : ''}${amount}`
+}
+
+/** Renewal price with its billing cycle, e.g. "¥ 30 / 月付"; the cycle part is dropped when blank. */
+export function formatCycleAmount(amount: number, currency: CurrencyCode, cycle: string | null | undefined): string {
+  const cycleText = (cycle ?? '').trim()
+  return `${formatCurrencyAmount(amount, currency, { spaced: true })}${cycleText ? ` / ${cycleText}` : ''}`
 }

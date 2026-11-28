@@ -4,7 +4,7 @@ import { useDismissibleAnchoredPopover } from '../../hooks/useDismissibleAnchore
 import type { AdminNodeInstallCommand } from '../../types'
 import { OverlaySurface } from '../OverlaySurface'
 import { calculateAnchoredPopoverStyle, measureAnchoredPopoverHeight } from './AdminFields'
-import { AdminFormSection } from './AdminPrimitives'
+import { AdminFormSection, adminErrorText } from './AdminPrimitives'
 
 export type AgentInstallPlatform = 'linux' | 'macos' | 'windows'
 
@@ -179,7 +179,7 @@ export function AdminInstallCommand({ nodeId, initialMessage, blocked = false, o
       })
       .catch((error: unknown) => {
         if (!isCurrentInstallCommandRequest(requestSequence, requestSequenceRef.current, requestNodeId, activeNodeIdRef.current)) return
-        setInstallCommandState({ kind: 'error', message: error instanceof Error ? error.message : 'unknown error' })
+        setInstallCommandState({ kind: 'error', message: adminErrorText(error, 'unknown error') })
       })
   }
 

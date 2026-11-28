@@ -5,34 +5,28 @@ import { ServerFlag } from './ServerFlag'
 import HomeStatusMatrix from './HomeStatusMatrix'
 import { availableCurrencyOptions, formatCurrencyAmount, normalizeCurrencyCode, normalizeCurrencyRates, type CurrencyCode, type CurrencyRates } from '../lib/currency'
 import { defaultSettings } from '../lib/appearance'
+import { byteUnits, scaleBytes } from '../lib/format'
 import type { AdminSettings, AdminTheme, HomeCardNode } from '../types'
 import { OverlaySurface } from './OverlaySurface'
 import { useAnchoredPopover } from '../hooks/useAnchoredPopover'
 import { useAnchoredPopoverPosition } from '../hooks/useAnchoredPopoverPosition'
 
-function compactBytes(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  let size = value
-  let unit = 0
-  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1 }
-  const amount = unit === 0 ? size.toFixed(0) : size.toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')
-  return `${amount} ${units[unit]}`
+// Rates trim trailing zeros (1.5 MB/s); cumulative totals always show two
+// decimals so that the two counters line up.
+function byteParts(value: number, trimZeros: boolean): { value: string; unit: string } {
+  if (!Number.isFinite(value) || value <= 0) return { value: '0', unit: 'B' }
+  const { size, power } = scaleBytes(value)
+  const fixed = size.toFixed(power === 0 ? 0 : 2)
+  return { value: trimZeros && power > 0 ? fixed.replace(/\.00$/, '').replace(/(\.\d)0$/, '$1') : fixed, unit: byteUnits[power] }
 }
 
 function compactRateParts(value: number): { value: string; unit: string } {
-  const [amount, unit = 'B'] = compactBytes(value).split(' ')
-  return { value: amount, unit: `${unit}/s` }
+  const parts = byteParts(value, true)
+  return { value: parts.value, unit: `${parts.unit}/s` }
 }
 
-// Cumulative totals always show two decimals so that the two counters line up.
 function totalBytesParts(value: number): { value: string; unit: string } {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  if (!Number.isFinite(value) || value <= 0) return { value: '0', unit: 'B' }
-  let size = value
-  let unit = 0
-  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1 }
-  return { value: unit === 0 ? size.toFixed(0) : size.toFixed(2), unit: units[unit] }
+  return byteParts(value, false)
 }
 
 interface HomeOverviewPanelProps {

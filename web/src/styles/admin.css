@@ -89,6 +89,9 @@
   grid-template-columns: minmax(0, 1fr) !important;
   gap: 16px;
 }
+/* Account/settings end on their action footer: keep the buttons off the card's
+   bottom edge by about the card's side inset. */
+.admin-workspace-form { padding-bottom: 16px; }
 .admin-workspace-card-list > .admin-workspace-card,
 .admin-workspace-form > .admin-workspace-card {
   min-width: 0;
@@ -318,7 +321,7 @@
 .admin-node-section .admin-list-row {
   /* Fixed action column: header and rows are separate grids, so an "auto"
      track would size differently in each. */
-  grid-template-columns: minmax(200px, 1.35fr) minmax(170px, 1.2fr) minmax(150px, 1fr) 72px 128px;
+  grid-template-columns: minmax(220px, 1.6fr) minmax(190px, 1.3fr) minmax(110px, .7fr) 128px;
 }
 .admin-target-list .admin-list-head,
 .admin-target-list .admin-list-row {
@@ -336,8 +339,6 @@
    middle and a narrow one before 操作, which stays at the right edge. The
    notification tables keep 状态 centred and 操作 at the right edge. */
 @media (min-width: 768px) {
-  .admin-node-section .admin-list-head, .admin-node-section .admin-list-row,
-  .admin-target-list .admin-list-head, .admin-target-list .admin-list-row,
   .admin-notification-list .admin-list-head, .admin-notification-list .admin-list-row,
   .admin-alert-rule-list .admin-list-head, .admin-alert-rule-list .admin-list-row { column-gap: 0; }
   .admin-node-section .admin-list-head, .admin-node-section .admin-list-row,
@@ -352,23 +353,16 @@
   .admin-alert-rule-list .admin-list-row > .admin-row-actions { justify-self: end; justify-content: flex-end; }
 }
 
-/* Redesigned list cells: name stack, sublines, billing and inline actions. */
+/* List cells: name stack, mobile-only meta line and inline actions. */
 .admin-node-name-stack { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .admin-node-name-stack .admin-node-title,
 .admin-target-title { min-width: 0; display: inline-flex; align-items: center; gap: 6px; }
-.admin-node-subline { min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.admin-node-subline.is-offline .admin-node-subline__status { color: var(--red); }
-.admin-node-subline.is-warning .admin-node-subline__status { color: var(--orange); }
-.admin-node-subline__ip { display: none; }
+.admin-list-mobile-meta { display: none; min-width: 0; overflow: hidden; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .admin-type-badge { flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--muted); font-size: 10.5px; font-weight: 400; }
-.admin-target-subline { display: none; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .admin-ip-stack,
 .admin-target-endpoint { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
 .admin-ip-stack span + span { color: var(--muted); }
 .admin-target-params { color: var(--muted); font-size: 11.5px; }
-.admin-list-row > .admin-node-billing { display: flex; flex-direction: column; gap: 3px; line-height: 1.2; overflow: visible; }
-.admin-node-billing > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.admin-node-expiry { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .admin-node-version { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; }
 .admin-node-row-actions { min-width: 0; display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; justify-self: end; }
 .admin-install-copy-menu.is-icon { position: relative; display: inline-flex; }
@@ -1527,6 +1521,7 @@
   .admin-settings-section { gap: 0; }
   .admin-workspace-card-list,
   .admin-workspace-form { gap: 12px; }
+  .admin-workspace-form { padding-bottom: 12px; }
   .admin-workspace-card-list > .admin-workspace-card,
   .admin-workspace-form > .admin-workspace-card {
     padding: 0;
@@ -1538,10 +1533,9 @@
   .admin-section-heading h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
   .admin-workspace-card .admin-form-section-title,
   .admin-workspace-card .admin-block-heading h4 { font-size: 15px; }
-  .admin-node-section .admin-list-row > :is(.admin-ip-stack, .admin-node-billing, .admin-node-version),
+  .admin-node-section .admin-list-row > :is(.admin-ip-stack, .admin-node-version),
   .admin-target-list .admin-list-row > :is(.admin-target-endpoint, .admin-target-params) { display: none; }
-  .admin-node-subline__ip,
-  .admin-target-subline { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .admin-list-mobile-meta { display: block; }
   .admin-node-row-actions { grid-column: 2 / 3; grid-row: 1; gap: 8px; }
   .admin-node-row-actions .admin-row-actions.admin-icon-actions { width: auto; display: flex; gap: 8px; }
   .admin-section-actions { width: auto; flex: 0 0 auto; margin-left: auto; justify-content: flex-end; flex-wrap: nowrap; gap: 6px; }

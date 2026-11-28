@@ -59,7 +59,7 @@ func scanLatencyRows[T any](rows *sql.Rows, points []T, point func(ts string, ts
 		}
 		if !hasLastTS || ts != lastTS {
 			lastTS = ts
-			lastTSFormatted = time.Unix(ts, 0).UTC().Format(time.RFC3339)
+			lastTSFormatted = unixRFC3339(ts)
 			hasLastTS = true
 		}
 		points = append(points, point(lastTSFormatted, ts, dimensionID, dimensionName, slab.nullFloatPtr(median), slab.nullFloatPtr(avg), loss))
@@ -261,7 +261,7 @@ func latencyGridSamplePointsFor[T any](ctx context.Context, s *sqliteLatencyQuer
 		}
 		if !hasLastTS || bucketTS != lastBucketTS {
 			lastBucketTS = bucketTS
-			lastTS = time.Unix(bucketTS, 0).UTC().Format(time.RFC3339)
+			lastTS = unixRFC3339(bucketTS)
 			hasLastTS = true
 		}
 		points = append(points, convert(latencyGridPointValue{
@@ -379,7 +379,7 @@ func latencyGridPointsFor[T any](
 	slab := floatSlab{buf: make([]float64, 0, totalPoints*2)}
 	for index := 0; index < gridWindow.Samples; index++ {
 		bucketTS := start.Add(time.Duration(index) * gridWindow.Step).Unix()
-		ts := time.Unix(bucketTS, 0).UTC().Format(time.RFC3339)
+		ts := unixRFC3339(bucketTS)
 		for _, item := range series {
 			var median, avg *float64
 			loss := float64(0)

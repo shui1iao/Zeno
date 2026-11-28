@@ -107,10 +107,7 @@ func (performance *runtimePerformance) snapshot(now time.Time) runtimePerformanc
 }
 
 func (s *sqliteMonitoringDomain) RuntimePerformance(ctx context.Context) (sqliteRuntimePerformance, error) {
-	readDB := s.readDB
-	if readDB == nil {
-		readDB = s.db
-	}
+	readDB := preferredReadDB(s.readDB, s.db)
 	snapshot := sqliteRuntimePerformance{BusyRetries: s.writes.busyRetries.Load()}
 	if err := readDB.QueryRowContext(ctx, `
 		SELECT
@@ -160,7 +157,7 @@ func (h *handler) handleAdminPerformance(w http.ResponseWriter, r *http.Request)
 		snapshot.SQLite.StateRollupRows = sqliteSnapshot.StateRollupRows
 		snapshot.SQLite.RawProbeRoundsApprox = sqliteSnapshot.RawProbeRoundsApprox
 		snapshot.SQLite.RawStateRowsApprox = sqliteSnapshot.RawStateRowsApprox
-		snapshot.SQLite.RollupEnabledAfter = time.Unix(sqliteSnapshot.RollupEnabledAfter, 0).UTC().Format(time.RFC3339)
+		snapshot.SQLite.RollupEnabledAfter = unixRFC3339(sqliteSnapshot.RollupEnabledAfter)
 		snapshot.SQLite.RollupReady = !time.Now().UTC().Before(time.Unix(sqliteSnapshot.RollupEnabledAfter, 0).UTC())
 	}
 	writeJSON(w, http.StatusOK, snapshot)

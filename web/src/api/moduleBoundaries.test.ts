@@ -50,16 +50,18 @@ describe('API module boundaries', () => {
   })
 
   it('routes every backend save area through the shared in-flow action footer', () => {
+    // Add/edit dialogs go through AdminFormModal, which itself renders the shared AdminActionFooter.
+    expect(readSource('components/admin/AdminPrimitives.tsx')).toMatch(/export function AdminFormModal[\s\S]*?<AdminActionFooter\b/)
     const expectedFooterCounts = new Map([
       ['components/admin/AdminNodeWorkspace.tsx', 2],
-      ['components/admin/AdminTargetWorkspace.tsx', 2],
+      ['components/admin/AdminTargetWorkspace.tsx', 1],
       ['components/admin/AdminNotificationsWorkspace.tsx', 2],
       ['components/admin/AdminAccountSection.tsx', 1],
       ['components/admin/AdminSettingsSection.tsx', 1],
     ])
     for (const [path, expectedCount] of expectedFooterCounts) {
       const source = readSource(path)
-      expect(source.match(/<AdminActionFooter\b/g) ?? [], path).toHaveLength(expectedCount)
+      expect(source.match(/<(AdminActionFooter|AdminFormModal)\b/g) ?? [], path).toHaveLength(expectedCount)
       expect(source, path).not.toContain('AdminModalActions')
       expect(source, path).not.toContain('admin-modal-actions')
     }

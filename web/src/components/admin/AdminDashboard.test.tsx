@@ -548,10 +548,12 @@ describe('AdminDashboard', () => {
     expect(html).not.toContain('v6 2001:db8::8')
     expect(html).toContain('admin-ip-stack')
     expect(html).not.toContain('debian 13')
-    // Billing and expiry are read straight off the row (the redesign moved them out of the edit modal).
-    expect(html).toContain('账单 · 到期')
-    expect(html).toMatch(/\d{4}-\d{2}-\d{2} · 剩余 \d+ 天/)
-    expect(html).toContain('class="admin-node-expiry"')
+    // The list carries no billing/expiry column and no online/offline text: the live dot shows state.
+    expect(html).not.toContain('账单 · 到期')
+    expect(html).not.toMatch(/\d{4}-\d{2}-\d{2} · 剩余 \d+ 天/)
+    expect(html).not.toContain('admin-node-expiry')
+    expect(html).not.toContain('admin-node-subline')
+    expect(html).toContain('admin-node-live-dot')
     expect(html).not.toContain('月付')
     expect(html).toContain('aria-label="复制 Example Node A 安装命令"')
     expect(html).not.toContain('example-harbor · 🇭🇰 HK · 顺序 10')

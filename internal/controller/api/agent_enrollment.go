@@ -43,7 +43,7 @@ func validRuntimeToken(token string) bool {
 }
 
 func (s *sqliteAgentAccess) issueAgentEnrollment(ctx context.Context, nodeID string) (string, time.Time, error) {
-	enrollmentToken, err := randomAdminCredential()
+	enrollmentToken, err := randomToken()
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -115,7 +115,7 @@ func (s *sqliteAgentAccess) RedeemAgentEnrollment(ctx context.Context, nodeID, e
 	}
 	defer func() { rollbackUnlessCommitted(tx) }()
 
-	result, err := tx.ExecContext(ctx, `
+	if err := execRequiringOneRow(ctx, tx, errAgentEnrollmentUnavailable, `
 		UPDATE agent_enrollment_tokens
 		SET used_at = ?
 		WHERE token_hash = ?
@@ -124,34 +124,18 @@ func (s *sqliteAgentAccess) RedeemAgentEnrollment(ctx context.Context, nodeID, e
 		  AND revoked_at IS NULL
 		  AND expires_at > ?
 		  AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND disabled = 0)
-	`, now.Unix(), hashAgentToken(enrollmentToken), nodeID, now.Unix(), nodeID)
-	if err != nil {
+	`, now.Unix(), hashAgentToken(enrollmentToken), nodeID, now.Unix(), nodeID); err != nil {
 		return err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected != 1 {
-		return errAgentEnrollmentUnavailable
-	}
-	result, err = tx.ExecContext(ctx, `
+	if err := execRequiringOneRow(ctx, tx, errAgentEnrollmentUnavailable, `
 		UPDATE nodes
 		SET pending_token_hash = ?,
 			pending_token_expires_at = ?,
 			install_token = NULL,
 			updated_at = ?
 		WHERE id = ? AND disabled = 0
-	`, hashAgentToken(runtimeToken), now.Add(agentPendingActivationTTL).Unix(), now.Unix(), nodeID)
-	if err != nil {
+	`, hashAgentToken(runtimeToken), now.Add(agentPendingActivationTTL).Unix(), now.Unix(), nodeID); err != nil {
 		return err
-	}
-	affected, err = result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected != 1 {
-		return errAgentEnrollmentUnavailable
 	}
 	if err := tx.Commit(); err != nil {
 		return err

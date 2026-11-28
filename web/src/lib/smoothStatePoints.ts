@@ -1,5 +1,6 @@
 import type { StatePoint } from '../types'
 import { applyKulinPeakCut, type KulinChartRow } from './kulinLatencyChart'
+import { isFiniteNumber } from './number'
 
 // Sampled values worth smoothing; capacities (memory/swap/disk totals) and
 // counters stay as reported.
@@ -34,7 +35,7 @@ export function smoothStatePoints(points: StatePoint[]): StatePoint[] {
     for (const field of smoothedFields) {
       const original = point[field]
       const value = smoothed[index][field]
-      if (typeof original === 'number' && Number.isFinite(original) && typeof value === 'number' && Number.isFinite(value)) next[field] = value
+      if (isFiniteNumber(original) && isFiniteNumber(value)) next[field] = value
     }
     return next
   })

@@ -14,10 +14,7 @@ var adminNotificationTypeCatalog = []AdminNotificationType{
 }
 
 func (s *sqliteNotificationDomain) AdminNotificationChannels(ctx context.Context) ([]AdminNotificationChannel, error) {
-	readDB := s.readDB
-	if readDB == nil {
-		readDB = s.db
-	}
+	readDB := preferredReadDB(s.readDB, s.db)
 	rows, err := readDB.QueryContext(ctx, `
 		SELECT id, name, destination, credential, enabled, created_at, updated_at
 		FROM notification_channels
@@ -71,22 +68,14 @@ func (s *sqliteNotificationDomain) CreateAdminNotificationChannel(ctx context.Co
 		return AdminNotificationChannel{}, err
 	}
 	destinationFingerprint := notificationDestinationFingerprint("telegram", create.Destination)
-	result, err := s.db.ExecContext(ctx, `
+	if err := execRequiringRows(ctx, s.db, errNotificationChannelAlreadyExists, `
 		INSERT OR IGNORE INTO notification_channels (
 			id, name, destination, credential, delivery_version,
 			destination_fingerprint, enabled, created_at, updated_at
 		)
 		VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
-	`, channelID, create.Name, create.Destination, credential, destinationFingerprint, enabled, now, now)
-	if err != nil {
+	`, channelID, create.Name, create.Destination, credential, destinationFingerprint, enabled, now, now); err != nil {
 		return AdminNotificationChannel{}, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return AdminNotificationChannel{}, err
-	}
-	if affected == 0 {
-		return AdminNotificationChannel{}, errNotificationChannelAlreadyExists
 	}
 	return s.adminNotificationChannelByID(ctx, channelID)
 }
@@ -124,16 +113,8 @@ func (s *sqliteNotificationDomain) UpdateAdminNotificationChannel(ctx context.Co
 	nowUnix := time.Now().UTC().Unix()
 	patch.set("updated_at", nowUnix)
 	statement, args := patch.updateStatement("notification_channels", "id = ?", channelID)
-	result, err := tx.ExecContext(ctx, statement, args...)
-	if err != nil {
+	if err := execRequiringOneRow(ctx, tx, errNotificationChannelNotFound, statement, args...); err != nil {
 		return AdminNotificationChannel{}, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return AdminNotificationChannel{}, err
-	}
-	if affected != 1 {
-		return AdminNotificationChannel{}, errNotificationChannelNotFound
 	}
 	if err := tx.Commit(); err != nil {
 		return AdminNotificationChannel{}, err
@@ -197,16 +178,8 @@ func (s *sqliteNotificationDomain) DeleteAdminNotificationChannel(ctx context.Co
 	if _, err := tx.ExecContext(ctx, `DELETE FROM notification_states WHERE channel_id = ?`, channelID); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `DELETE FROM notification_channels WHERE id = ?`, channelID)
-	if err != nil {
+	if err := execRequiringRows(ctx, tx, errNotificationChannelNotFound, `DELETE FROM notification_channels WHERE id = ?`, channelID); err != nil {
 		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return errNotificationChannelNotFound
 	}
 	if err := tx.Commit(); err != nil {
 		return err
@@ -285,26 +258,18 @@ func (s *sqliteNotificationDomain) UpdateAdminNotificationType(ctx context.Conte
 	// alert rule (currently node_offline and renewal_due) update that rule. Do
 	// not fan out by notification_event_type; resource rules share
 	// probe_unhealthy and must remain independently configurable.
-	result, err := tx.ExecContext(ctx, `
+	if err := execRequiringOneRow(ctx, tx, errNotificationTypeNotFound, `
 		UPDATE alert_rules
 		SET enabled = ?, updated_at = ?
 		WHERE id = ?
-	`, enabled, now, eventType)
-	if err != nil {
+	`, enabled, now, eventType); err != nil {
 		return AdminNotificationType{}, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return AdminNotificationType{}, err
-	}
-	if affected != 1 {
-		return AdminNotificationType{}, errNotificationTypeNotFound
 	}
 	if err := tx.Commit(); err != nil {
 		return AdminNotificationType{}, err
 	}
 	tx = nil
-	return AdminNotificationType{EventType: eventType, Label: label, Enabled: *update.Enabled, UpdatedAt: time.Unix(now, 0).UTC().Format(time.RFC3339)}, nil
+	return AdminNotificationType{EventType: eventType, Label: label, Enabled: *update.Enabled, UpdatedAt: unixRFC3339(now)}, nil
 }
 
 func adminNotificationTypeLabel(eventType string) (string, bool) {

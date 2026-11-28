@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react'
 import { fetchPublicSettings } from '../api/publicClient'
 import { defaultSettings } from '../lib/appearance'
+import { isFiniteNumber } from '../lib/number'
 import type { AdminSettings } from '../types'
 
 export const publicSettingsCacheKey = 'zeno_public_settings_v1'
@@ -10,7 +11,7 @@ function stringOrDefault(value: unknown, fallback: string): string {
 }
 
 function finiteNumberOrDefault(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
+  return isFiniteNumber(value) ? value : fallback
 }
 
 export function normalizeStoredPublicSettings(parsed: unknown): AdminSettings | null {

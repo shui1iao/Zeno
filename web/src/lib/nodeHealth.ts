@@ -29,3 +29,12 @@ export function expiryBadge(expiryLabel: string | null | undefined, now: Date = 
 export function isOfflineStatus(status: NodeStatus | null | undefined): boolean {
   return status === 'offline' || status === 'no_data'
 }
+
+export type NodeVisualStatus = 'online' | 'warning' | 'offline'
+
+export const nodeStatusLabels: Record<NodeVisualStatus, string> = { online: '在线', warning: '异常', offline: '离线' }
+
+/** Home card / list / status matrix tone: offline wins, then warning, everything else reads as online. */
+export function nodeVisualStatus(status: NodeStatus | null | undefined): NodeVisualStatus {
+  return isOfflineStatus(status) ? 'offline' : status === 'warning' ? 'warning' : 'online'
+}

@@ -1,4 +1,5 @@
 import type { LatencyPoint } from '../types'
+import { isFiniteNumber } from './number'
 
 export interface LatencyTargetSummary {
   targetId: string
@@ -33,7 +34,7 @@ export function summarizeLatencyTargets(points: LatencyPoint[]): LatencyTargetSu
 
     acc.targetName = point.targetName
     const delay = point.avgMs
-    const hasDelay = typeof delay === 'number' && Number.isFinite(delay)
+    const hasDelay = isFiniteNumber(delay)
     const missingBucket = !hasDelay && point.lossPercent === 0
     if (!missingBucket) acc.sampleCount += 1
     if (hasDelay) {

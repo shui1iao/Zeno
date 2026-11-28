@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { StatePoint } from '../types'
-import { formatBps, formatBytes, formatPercent, formatTooltipDateTime, missingValue } from '../lib/format'
+import { formatBps, formatBytes, formatPercent, formatTooltipDateTime, missingValue, scaleBytes } from '../lib/format'
+import { finiteOrNull } from '../lib/number'
 import { availableHistoryRanges } from '../lib/historyRange'
-import { lastFiniteIndex, maxFinite, type ResourceScale } from '../lib/resourceChart'
+import { lastFiniteIndex, maxFinite, sortedByTime, type ResourceScale } from '../lib/resourceChart'
 import { HistoryRangeSelector } from './HistoryRangeSelector'
 import { SmoothingSelector, type SmoothingMode } from './SmoothingSelector'
 import { smoothStatePoints } from '../lib/smoothStatePoints'
@@ -170,13 +171,7 @@ export function buildChartView(metrics: ResourceMetric[], selectedKeys: string[]
 }
 
 function sortStatePoints(points: StatePoint[]): StatePoint[] {
-  const valid = points.filter((point) => Number.isFinite(Date.parse(point.ts)))
-  for (let index = 1; index < valid.length; index += 1) {
-    if (Date.parse(valid[index].ts) < Date.parse(valid[index - 1].ts)) {
-      return [...valid].sort((left, right) => Date.parse(left.ts) - Date.parse(right.ts))
-    }
-  }
-  return valid
+  return sortedByTime(points.filter((point) => Number.isFinite(Date.parse(point.ts))), (point) => Date.parse(point.ts))
 }
 
 function latestOf(values: Array<number | null>, format: (index: number) => string): string {
@@ -299,9 +294,8 @@ function compactBytePair(used: number | null, total: number | null): string {
   const safeTotal = finiteOrNull(total)
   if (safeUsed === null || safeTotal === null || safeTotal <= 0) return formatResourceValue(used, total)
   const totalText = formatBytes(safeTotal)
-  const unit = totalText.split(' ')[1]
-  const power = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'].indexOf(unit)
-  if (power < 0) return formatResourceValue(used, total)
+  // Same unit as the total's label.
+  const { power } = scaleBytes(safeTotal)
   const scaled = safeUsed / 1024 ** power
   const usedText = power === 0 ? String(Math.round(scaled)) : scaled > 0 && scaled < 1 ? scaled.toFixed(2) : scaled.toFixed(1)
   return `${usedText} / ${totalText}`
@@ -338,6 +332,3 @@ function ratioPercent(used: number | null | undefined, total: number | null | un
   return Math.max(0, Math.min(100, (safeUsed / safeTotal) * 100))
 }
 
-function finiteOrNull(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}

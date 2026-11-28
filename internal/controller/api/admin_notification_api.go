@@ -3,12 +3,11 @@ package api
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 )
 
 func (h *handler) handleAdminNotificationChannels(w http.ResponseWriter, r *http.Request) {
-	handleAdminReadMutation(h, w, r, http.MethodPost, http.StatusCreated, readAdminNotificationChannels, createAdminNotificationChannel)
+	handleAdminReadMutation(h, w, r, http.MethodPost, http.StatusCreated, readAdminNotificationChannels, createAdminNotificationChannel, nil)
 }
 
 func readAdminNotificationChannels(ctx context.Context, store adminStore) (AdminNotificationChannelsResponse, error) {
@@ -22,42 +21,28 @@ func createAdminNotificationChannel(ctx context.Context, store adminStore, creat
 }
 
 func (h *handler) handleAdminNotificationChannelResource(w http.ResponseWriter, r *http.Request) {
-	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/admin/v1/notification-channels/"), "/")
-	parts := strings.Split(path, "/")
+	parts := adminResourcePathParts(r, "/api/admin/v1/notification-channels/")
 	if len(parts) == 2 && parts[0] != "" && parts[1] == "test" {
 		h.handleAdminNotificationChannelTest(w, r, parts[0])
 		return
 	}
-	if len(parts) != 1 || parts[0] == "" {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if r.Method != http.MethodPatch && r.Method != http.MethodDelete {
-		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-		return
-	}
-	store, ok := h.authorizeAdminRequest(w, r)
+	channelID, ok := adminSingleResourceID(w, parts)
 	if !ok {
 		return
 	}
-	if r.Method == http.MethodDelete {
-		if err := store.DeleteAdminNotificationChannel(r.Context(), parts[0]); err != nil {
-			writeAdminError(w, err)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	var update AdminNotificationChannelUpdateRequest
-	if !decodeJSONBody(w, r, &update, adminJSONBodyLimit, true) {
-		return
-	}
-	channel, err := store.UpdateAdminNotificationChannel(r.Context(), parts[0], update)
-	if err != nil {
-		writeAdminError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, AdminNotificationChannelResponse{Channel: channel})
+	handleAdminResource(h, w, r, channelID, adminResourceOps[AdminNotificationChannelUpdateRequest, AdminNotificationChannelResponse]{
+		update: updateAdminNotificationChannel,
+		remove: deleteAdminNotificationChannel,
+	})
+}
+
+func updateAdminNotificationChannel(ctx context.Context, store adminStore, channelID string, update AdminNotificationChannelUpdateRequest) (AdminNotificationChannelResponse, error) {
+	channel, err := store.UpdateAdminNotificationChannel(ctx, channelID, update)
+	return AdminNotificationChannelResponse{Channel: channel}, err
+}
+
+func deleteAdminNotificationChannel(ctx context.Context, store adminStore, channelID string) error {
+	return store.DeleteAdminNotificationChannel(ctx, channelID)
 }
 
 func (h *handler) handleAdminNotificationChannelTest(w http.ResponseWriter, r *http.Request, channelID string) {

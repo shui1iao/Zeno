@@ -42,10 +42,7 @@ type sqliteAgentAccess struct {
 }
 
 func (s *sqliteAgentAccess) queryReadDB() *sql.DB {
-	if s.readDB != nil {
-		return s.readDB
-	}
-	return s.db
+	return preferredReadDB(s.readDB, s.db)
 }
 
 const dummyAdminPasswordHash = "argon2id:v=19:m=65536:t=3:p=2:emVuby1kdW1teS1zYWx0:MfaHhKQHaOt+QsALfIOerW4EtUmf5zKMiHhxvflHstY"

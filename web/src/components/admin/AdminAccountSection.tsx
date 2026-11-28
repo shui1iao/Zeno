@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from 'react'
 import type { AdminAccountData } from '../../api/adminSession'
-import { AdminActionFooter, AdminWorkspaceHeading } from './AdminPrimitives'
+import { AdminActionFooter, AdminWorkspaceHeading, adminErrorText } from './AdminPrimitives'
 
 export interface AdminAccountSectionProps {
   account: AdminAccountData
@@ -44,7 +44,7 @@ export default function AdminAccountSection({ account, onUpdate, onLogout }: Adm
     setMessage(null)
     onUpdate(username, currentPassword, newPassword)
       .then(() => setMessage({ kind: 'success', text: '账户已更新。' }))
-      .catch((error: unknown) => setMessage({ kind: 'error', text: error instanceof Error ? error.message : '账户更新失败。' }))
+      .catch((error: unknown) => setMessage({ kind: 'error', text: adminErrorText(error, '账户更新失败。') }))
       .finally(() => setSubmitting(false))
   }
 

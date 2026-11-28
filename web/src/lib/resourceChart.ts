@@ -1,5 +1,7 @@
-// Pure geometry and scale helpers for the server-detail resource charts.
-// Kept free of React so that the drawing rules can be unit-tested directly.
+// Pure geometry and scale helpers for the server-detail charts (resource and
+// latency). Kept free of React so that the drawing rules can be unit-tested directly.
+import { byteUnits, formatClock, scaleBytes } from './format'
+import { isFiniteNumber } from './number'
 
 export type ResourceScale = 'percent' | 'rate' | 'count'
 
@@ -30,7 +32,7 @@ export function niceStep(value: number, allowQuarter = true): number {
 export function maxFinite(values: ReadonlyArray<number | null>): number | null {
   let max: number | null = null
   for (const value of values) {
-    if (typeof value === 'number' && Number.isFinite(value) && (max === null || value > max)) max = value
+    if (isFiniteNumber(value) && (max === null || value > max)) max = value
   }
   return max
 }
@@ -69,14 +71,39 @@ export function formatResourceAxis(value: number, scale: ResourceScale, domainMa
   if (scale === 'percent') return `${Math.round(value)}%`
   if (scale === 'count') return trimNumber(value)
   if (value <= 0) return '0'
-  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s']
-  let base = 1
-  let unit = 0
-  while (domainMax / base >= kib && unit < units.length - 1) {
-    base *= kib
-    unit += 1
+  // Up to TB/s (power 4).
+  const { power } = scaleBytes(domainMax, 4)
+  return `${trimNumber(value / kib ** power)} ${byteUnits[power]}/s`
+}
+
+/** Time-axis label: HH:mm, with M/D in front once the visible span exceeds 36 hours. */
+export function formatAxisTime(timestamp: number, spanMs: number): string {
+  const date = new Date(timestamp)
+  if (Number.isNaN(date.getTime())) return '--:--'
+  const time = formatClock(date)
+  if (spanMs > 36 * 3_600_000) return `${date.getMonth() + 1}/${date.getDate()} ${time}`
+  return time
+}
+
+/** Returns items ascending by time, copying and sorting only when they are out of order. */
+export function sortedByTime<T>(items: T[], timeOf: (item: T) => number): T[] {
+  for (let index = 1; index < items.length; index += 1) {
+    if (timeOf(items[index]) < timeOf(items[index - 1])) {
+      return [...items].sort((left, right) => timeOf(left) - timeOf(right))
+    }
   }
-  return `${trimNumber(value / base)} ${units[unit]}`
+  return items
+}
+
+/** Pointer position in the SVG's own user units (viewBox), or null when the SVG has no screen matrix. */
+export function svgPointerX(target: SVGGraphicsElement, clientX: number, clientY: number): number | null {
+  const svg = target.ownerSVGElement
+  const ctm = svg?.getScreenCTM()
+  if (!svg || !ctm) return null
+  const point = svg.createSVGPoint()
+  point.x = clientX
+  point.y = clientY
+  return point.matrixTransform(ctm.inverse()).x
 }
 
 /** Median spacing between samples; robust against a few missing buckets. */
@@ -103,7 +130,7 @@ export function splitSegments(timestamps: ReadonlyArray<number>, values: Readonl
   for (let index = 0; index < timestamps.length; index += 1) {
     const t = timestamps[index]
     const v = values[index]
-    const usable = Number.isFinite(t) && typeof v === 'number' && Number.isFinite(v)
+    const usable = Number.isFinite(t) && isFiniteNumber(v)
     if (!usable) {
       if (current.length > 0) segments.push(current)
       current = []
@@ -187,8 +214,7 @@ export function nearestIndex(timestamps: ReadonlyArray<number>, t: number): numb
 
 export function lastFiniteIndex(values: ReadonlyArray<number | null>): number {
   for (let index = values.length - 1; index >= 0; index -= 1) {
-    const value = values[index]
-    if (typeof value === 'number' && Number.isFinite(value)) return index
+    if (isFiniteNumber(values[index])) return index
   }
   return -1
 }

@@ -1,4 +1,6 @@
 import type { LatencyPoint } from '../types'
+import { finiteOrNull, isFiniteNumber } from './number'
+import { sortedByTime } from './resourceChart'
 
 export interface KulinSeriesPoint {
   created_at: number
@@ -119,21 +121,16 @@ export function buildKulinTargetSeries(points: LatencyPoint[]): KulinTargetSerie
 }
 
 function latencyPointTimestamp(point: LatencyPoint): number {
-  return typeof point.tsMs === 'number' && Number.isFinite(point.tsMs) ? point.tsMs : Date.parse(point.ts)
+  return isFiniteNumber(point.tsMs) ? point.tsMs : Date.parse(point.ts)
 }
 
 function orderedLatencyPoints(points: LatencyPoint[]): LatencyPoint[] {
-  for (let index = 1; index < points.length; index += 1) {
-    if (latencyPointTimestamp(points[index - 1]) > latencyPointTimestamp(points[index])) {
-      return [...points].sort((left, right) => latencyPointTimestamp(left) - latencyPointTimestamp(right))
-    }
-  }
-  return points
+  return sortedByTime(points, latencyPointTimestamp)
 }
 
 function latencyDelay(point: LatencyPoint): number | null {
   if (Number.isFinite(point.lossPercent) && point.lossPercent >= 100) return null
-  return typeof point.avgMs === 'number' && Number.isFinite(point.avgMs) ? point.avgMs : null
+  return finiteOrNull(point.avgMs)
 }
 
 export function buildKulinChartRows(series: KulinTargetSeries[]): KulinChartRow[] {
@@ -203,7 +200,7 @@ export function applyKulinPeakCut(rows: KulinChartRow[], keysToProcess: string[]
     for (const key of keysToProcess) {
       const values = window
         .map((row) => row[key])
-        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+        .filter(isFiniteNumber)
 
       if (values.length > 0) {
         const processed = processKulinPeakValues(values, alpha)

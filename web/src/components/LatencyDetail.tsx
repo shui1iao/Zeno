@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { HomeCardNode, LatencyPoint, StatePoint } from '../types'
-import { formatLatency, formatTooltipDateTime } from '../lib/format'
+import { byteUnits, formatLatency, formatTooltipDateTime, scaleBytes } from '../lib/format'
 import { summarizeLatencyTargets } from '../lib/latencyTargets'
 import { seriesColorMap } from '../lib/seriesColors'
 import { LatencyChart } from './LatencyChart'
-import { BackIcon, PacketLossIcon, packetLossTone } from './icons'
+import { BackIcon, PacketLossIcon, packetLossTone, TriangleAlertIcon } from './icons'
 import { ServerFlag } from './ServerFlag'
 import { StateHistoryPanel } from './StateHistoryPanel'
 import { availableHistoryRanges } from '../lib/historyRange'
@@ -12,8 +12,9 @@ import { HistoryRangeSelector } from './HistoryRangeSelector'
 import { SmoothingSelector, type SmoothingMode } from './SmoothingSelector'
 import { latencyTargetCorners } from '../lib/targetGridCorners'
 // Via ServerCard (entry chunk) so the shared helper does not split into an extra preloaded chunk.
-import { expiryBadge } from './ServerCard'
-import { formatCurrencyAmount, normalizeCurrencyCode } from '../lib/currency'
+import { expiryBadge, formatCoreCount, nodeStatusLabels } from './ServerCard'
+import { isPositiveFinite } from '../lib/number'
+import { formatCycleAmount, normalizeCurrencyCode } from '../lib/currency'
 
 const DESKTOP_LATENCY_COLUMNS = 7
 const MOBILE_LATENCY_COLUMNS = 3
@@ -111,12 +112,12 @@ export function LatencyDetail({
               <span>{node.displayName}</span>
             </button>
             <div className="detail-hero__badges" aria-label="server live status">
-              <span className={`detail-status-pill status-${visualStatus}`}>{formatStatusLabel(node.status)}</span>
+              <span className={`detail-status-pill status-${visualStatus}`}>{nodeStatusLabels[visualStatus]}</span>
             </div>
           </div>
           {isOfflineNode && (
             <div className="detail-offline-banner" role="status">
-              <OfflineIcon />
+              <TriangleAlertIcon />
               <span>节点已离线</span>
               <em>{bootValue ? `上次启动 ${bootValue} · 以下为离线前的历史数据` : '以下为离线前的历史数据'}</em>
             </div>
@@ -234,22 +235,10 @@ function LatencyReading({ value }: { value: number | null | undefined }) {
   return <>{amount} <small>{unit}</small></>
 }
 
-function OfflineIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
-      <path d="M12 9v4" />
-      <path d="M12 17h.01" />
-    </svg>
-  )
-}
-
 function BillingFact({ node }: { node: HomeCardNode }) {
   const expiry = expiryBadge(node.expiryLabel)
   const amount = node.renewalAmount
-  const hasAmount = amount !== null && amount !== undefined && Number.isFinite(amount) && amount > 0
-  const cycle = (node.billingCycle ?? '').trim()
-  const bill = hasAmount ? `${formatCurrencyAmount(amount, normalizeCurrencyCode(node.renewalCurrency), { spaced: true })}${cycle ? ` / ${cycle}` : ''}` : '--'
+  const bill = isPositiveFinite(amount) ? formatCycleAmount(amount, normalizeCurrencyCode(node.renewalCurrency), node.billingCycle) : '--'
   const remaining = !expiry ? null : expiry.days === null ? expiry.text : expiry.days < 0 ? '已过期' : `剩余 ${expiry.days} 天`
   return (
     <article className="detail-fact detail-fact--billing" title={`账单: ${bill}${remaining ? ` · ${remaining}` : ''}`}>
@@ -359,12 +348,6 @@ function formatUptimeFromBootTime(value: string | undefined): string | null {
   return formatUptime(seconds)
 }
 
-function formatStatusLabel(status: HomeCardNode['status']): string {
-  if (status === 'online') return '在线'
-  if (status === 'warning') return '异常'
-  return '离线'
-}
-
 function formatOSLabel(node: HomeCardNode): string {
   return [node.os, node.osVersion].filter(Boolean).join(' ') || '--'
 }
@@ -374,14 +357,7 @@ function formatSystemSpec(node: HomeCardNode): string {
 }
 
 function formatCpuSpec(node: HomeCardNode): string {
-  return [node.cpuModel || '--', formatCores(node.cpuCores, node.virtualization)].filter(Boolean).join(' · ')
-}
-
-function formatCores(value: number | null | undefined, virtualization?: string): string {
-  const label = coreTypeLabel(virtualization)
-  if (value === null || value === undefined) return `-- ${label.plural}`
-  const formatted = Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)
-  return `${formatted} ${value === 1 ? label.singular : label.plural}`
+  return [node.cpuModel || '--', formatCoreCount(node.cpuCores, coreTypeLabel(node.virtualization))].filter(Boolean).join(' · ')
 }
 
 function coreTypeLabel(virtualization?: string): { singular: string; plural: string } {
@@ -420,14 +396,9 @@ export function formatPlatform(value: string | undefined): string {
 function formatBinaryBytes(value: number | null | undefined): string {
   if (value === null || value === undefined) return '--'
   if (value <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = value
-  let unit = 0
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024
-    unit += 1
-  }
-  return `${size.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`
+  // Lifetime totals stop at TB (4) rather than PB.
+  const { size, power } = scaleBytes(value, 4)
+  return `${size.toFixed(power === 0 ? 0 : 2)} ${byteUnits[power]}`
 }
 
 function formatLossPercent(value: number | null | undefined): string {

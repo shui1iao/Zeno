@@ -153,41 +153,25 @@ const agentStateSampleLookupSQL = `
 `
 
 func lockAgentNodeWriteTx(ctx context.Context, tx *sql.Tx, nodeID string) error {
-	result, err := tx.ExecContext(ctx, `
+	if err := execRequiringRows(ctx, tx, errNodeNotFound, `
 		UPDATE nodes
 		SET updated_at = updated_at
 		WHERE id = ? AND disabled = 0
-	`, nodeID)
-	if err != nil {
+	`, nodeID); err != nil {
 		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return errNodeNotFound
 	}
 	return nil
 }
 
 func updateAgentLivenessOnlyTx(ctx context.Context, tx *sql.Tx, nodeID string, nowUnix int64) error {
-	result, err := tx.ExecContext(ctx, `
+	if err := execRequiringRows(ctx, tx, errNodeNotFound, `
 		UPDATE nodes
 		SET status = CASE WHEN status IN ('warning', 'offline') THEN status ELSE 'online' END,
 		    last_seen_at = CASE WHEN last_seen_at IS NULL OR last_seen_at <= ? THEN ? ELSE last_seen_at END,
 		    updated_at = CASE WHEN updated_at <= ? THEN ? ELSE updated_at END
 		WHERE id = ? AND disabled = 0
-	`, nowUnix, nowUnix, nowUnix, nowUnix, nodeID)
-	if err != nil {
+	`, nowUnix, nowUnix, nowUnix, nowUnix, nodeID); err != nil {
 		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return errNodeNotFound
 	}
 	return nil
 }

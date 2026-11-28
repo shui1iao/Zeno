@@ -8,10 +8,7 @@ import (
 )
 
 func (s *sqliteAdminDomain) queryReadDB() *sql.DB {
-	if s.readDB != nil {
-		return s.readDB
-	}
-	return s.db
+	return preferredReadDB(s.readDB, s.db)
 }
 
 func (s *sqliteAdminDomain) AdminNodes(ctx context.Context) ([]AdminNode, error) {
@@ -195,7 +192,7 @@ func (s *sqliteAdminDomain) CreateAdminProbeTarget(ctx context.Context, create A
 		return AdminProbeTarget{}, err
 	}
 	defer func() { rollbackUnlessCommitted(tx) }()
-	if _, err := tx.ExecContext(ctx, `UPDATE probe_config_meta SET version = version WHERE id = 1`); err != nil {
+	if err := reserveSQLiteWriterTx(ctx, tx); err != nil {
 		return AdminProbeTarget{}, err
 	}
 	usageBefore, err := probeNodeUsagesTx(ctx, tx)
@@ -224,19 +221,11 @@ func (s *sqliteAdminDomain) CreateAdminProbeTarget(ctx context.Context, create A
 			displayOrder = int(maxDisplayOrder) + 10
 		}
 	}
-	result, err := tx.ExecContext(ctx, `
+	if err := execRequiringRows(ctx, tx, errProbeTargetAlreadyExists, `
 		INSERT OR IGNORE INTO probe_targets (id, name, type, address, port, count, timeout_ms, interval_sec, display_order, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, targetID, create.Name, create.Type, create.Address, adminOptionalInt64SQLValue(create.Port), create.Count, create.TimeoutMS, create.IntervalSec, displayOrder, now, now)
-	if err != nil {
+	`, targetID, create.Name, create.Type, create.Address, adminOptionalInt64SQLValue(create.Port), create.Count, create.TimeoutMS, create.IntervalSec, displayOrder, now, now); err != nil {
 		return AdminProbeTarget{}, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return AdminProbeTarget{}, err
-	}
-	if affected == 0 {
-		return AdminProbeTarget{}, errProbeTargetAlreadyExists
 	}
 	for _, assignment := range create.Assignments {
 		var nodeExists int
@@ -289,7 +278,7 @@ func (s *sqliteAdminDomain) UpdateAdminProbeTarget(ctx context.Context, targetID
 		return AdminProbeTarget{}, err
 	}
 	defer func() { rollbackUnlessCommitted(tx) }()
-	if _, err := tx.ExecContext(ctx, `UPDATE probe_config_meta SET version = version WHERE id = 1`); err != nil {
+	if err := reserveSQLiteWriterTx(ctx, tx); err != nil {
 		return AdminProbeTarget{}, err
 	}
 	current, err := adminProbeTargetConfigTx(ctx, tx, targetID)
@@ -472,7 +461,7 @@ func (s *sqliteAdminDomain) UpdateAdminNode(ctx context.Context, nodeID string, 
 		return AdminNode{}, err
 	}
 	defer func() { rollbackUnlessCommitted(tx) }()
-	if _, err := tx.ExecContext(ctx, `UPDATE probe_config_meta SET version = version WHERE id = 1`); err != nil {
+	if err := reserveSQLiteWriterTx(ctx, tx); err != nil {
 		return AdminNode{}, err
 	}
 
@@ -541,7 +530,7 @@ func (s *sqliteAdminDomain) ReorderAdminNodes(ctx context.Context, request Admin
 		return err
 	}
 	defer func() { rollbackUnlessCommitted(tx) }()
-	if _, err := tx.ExecContext(ctx, `UPDATE probe_config_meta SET version = version WHERE id = 1`); err != nil {
+	if err := reserveSQLiteWriterTx(ctx, tx); err != nil {
 		return err
 	}
 	if err := reorderAdminDisplayOrderTx(ctx, tx, request.NodeIDs, errInvalidAdminNodeUpdate, `
@@ -572,7 +561,7 @@ func (s *sqliteAdminDomain) ReorderAdminProbeTargets(ctx context.Context, reques
 		return err
 	}
 	defer func() { rollbackUnlessCommitted(tx) }()
-	if _, err := tx.ExecContext(ctx, `UPDATE probe_config_meta SET version = version WHERE id = 1`); err != nil {
+	if err := reserveSQLiteWriterTx(ctx, tx); err != nil {
 		return err
 	}
 	if err := reorderAdminDisplayOrderTx(ctx, tx, request.TargetIDs, errInvalidAdminTargetWrite, `

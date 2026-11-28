@@ -255,7 +255,7 @@ func insertProbeRoundTx(ctx context.Context, tx *sql.Tx, nodeID string, round pr
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO probe_rounds (node_id, target_id, ts, type, idempotency_key, agent_round_id, payload_hash, sent, received, loss_percent, min_ms, avg_ms, median_ms, max_ms, stddev_ms, error)
 		VALUES (?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, nodeID, round.target.ID, ts, round.target.Type, idempotencyKey, agentRoundID, payloadHash, stats.Sent, stats.Received, stats.LossPercent, nullableFloat(stats.MinMS), nullableFloat(stats.AvgMS), nullableFloat(stats.MedianMS), nullableFloat(stats.MaxMS), nullableFloat(stats.StddevMS), roundError(round.samples))
+	`, nodeID, round.target.ID, ts, round.target.Type, idempotencyKey, agentRoundID, payloadHash, stats.Sent, stats.Received, stats.LossPercent, nullableValue(stats.MinMS), nullableValue(stats.AvgMS), nullableValue(stats.MedianMS), nullableValue(stats.MaxMS), nullableValue(stats.StddevMS), roundError(round.samples))
 	if err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func insertProbeRoundTx(ctx context.Context, tx *sql.Tx, nodeID string, round pr
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO probe_samples (round_id, seq, success, latency_ms, error)
 			VALUES (?, ?, ?, ?, ?)
-		`, roundID, seq, sqliteBoolInt(sample.Success), nullableFloat(sample.LatencyMS), nullIfEmpty(sample.Error)); err != nil {
+		`, roundID, seq, sqliteBoolInt(sample.Success), nullableValue(sample.LatencyMS), nullIfEmpty(sample.Error)); err != nil {
 			return err
 		}
 	}
@@ -315,11 +315,4 @@ func roundError(samples []probe.Sample) any {
 		}
 	}
 	return nil
-}
-
-func nullableFloat(value *float64) any {
-	if value == nil {
-		return nil
-	}
-	return *value
 }

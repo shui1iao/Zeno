@@ -149,10 +149,7 @@ func validExchangeRate(value float64) bool {
 }
 
 func (s *sqliteMonitoringDomain) exchangeRateSnapshot(ctx context.Context) (map[string]float64, error) {
-	readDB := s.readDB
-	if readDB == nil {
-		readDB = s.db
-	}
+	readDB := preferredReadDB(s.readDB, s.db)
 	rates := map[string]float64{"CNY": 1}
 	rows, err := readDB.QueryContext(ctx, `
 		SELECT currency, cny_rate

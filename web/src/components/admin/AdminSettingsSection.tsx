@@ -5,7 +5,7 @@ import { validateAdminSettingsInput } from '../../lib/adminSettings'
 import { runMaybePromise, type MaybePromise } from '../../lib/maybePromise'
 import type { AdminSettings, AppearancePreset, ServerCardTheme } from '../../types'
 import { SlidingSelector } from '../SlidingSelector'
-import { AdminFormSection, AdminActionFooter, AdminWorkspaceHeading } from './AdminPrimitives'
+import { AdminFormSection, AdminActionFooter, AdminWorkspaceHeading, adminErrorText } from './AdminPrimitives'
 
 export interface AdminSettingsSectionProps {
   settings: AdminSettings
@@ -148,7 +148,7 @@ export default function AdminSettingsSection({ settings, onUpdate }: AdminSettin
           setSettingsError(null)
           return
         }
-        setSettingsError(error instanceof Error ? error.message : '设置保存失败')
+        setSettingsError(adminErrorText(error, '设置保存失败'))
       })
       .finally(() => setSubmitting(false))
   }

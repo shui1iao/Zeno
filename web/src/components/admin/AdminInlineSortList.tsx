@@ -2,6 +2,7 @@ import { type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type Poin
 import { createPortal } from 'react-dom'
 import { runMaybePromise } from '../../lib/maybePromise'
 import type { MaybePromise } from './adminOperationalTypes'
+import { adminErrorText } from './AdminPrimitives'
 
 type SortableItem = { id: string }
 
@@ -126,7 +127,7 @@ export function AdminInlineSortList<T extends SortableItem>({ items, listLabel, 
       .catch((error: unknown) => {
         orderedIdsRef.current = rollbackIds
         setOrderedIds(rollbackIds)
-        setFormError(error instanceof Error ? error.message : '应用排序失败')
+        setFormError(adminErrorText(error, '应用排序失败'))
         setSortAnnouncement('排序应用失败，已恢复原顺序')
       })
       .finally(() => setSubmitting(false))

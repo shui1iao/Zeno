@@ -16,6 +16,7 @@ import type { NodeDetailRouteProps } from './components/NodeDetailRoute'
 import type { DashboardRoute } from './lib/route'
 import { prefetchNodeLatency } from './api/publicClient'
 import { BackIcon } from './components/icons'
+import { sumValues } from './lib/number'
 
 export { applyCustomCode, extractSafeCustomCSS } from './lib/customCode'
 export { availableHistoryRanges, coerceHistoryRange, rangeRequiresAdmin } from './lib/historyRange'
@@ -117,20 +118,16 @@ export function pageTitleForRoute(route: DashboardRoute, nodeName?: string): str
   return undefined
 }
 
-function sum(values: Array<number | null | undefined>): number {
-  return values.reduce<number>((total, value) => total + (value ?? 0), 0)
-}
-
 export function homeTrafficTotalsForNodes(nodes: HomeCardNode[]): { totalUp: number; totalDown: number } {
   return {
-    totalUp: sum(nodes.map((node) => node.netOutLifetimeBytes ?? node.netOutTotalBytes)),
-    totalDown: sum(nodes.map((node) => node.netInLifetimeBytes ?? node.netInTotalBytes)),
+    totalUp: sumValues(nodes.map((node) => node.netOutLifetimeBytes ?? node.netOutTotalBytes)),
+    totalDown: sumValues(nodes.map((node) => node.netInLifetimeBytes ?? node.netInTotalBytes)),
   }
 }
 
 export function homeMonthlyCostForNodes(nodes: HomeCardNode[], displayCurrency: CurrencyCode, inputExchangeRates: CurrencyRates): number {
   const exchangeRates = normalizeCurrencyRates(inputExchangeRates)
-  return sum(nodes.map((node) => {
+  return sumValues(nodes.map((node) => {
     if (node.monthlyCostCny === null || node.monthlyCostCny === undefined) return 0
     const cycleMonths = billingCycleMonths(node.billingCycle)
     const convertedRenewal = cycleMonths > 0

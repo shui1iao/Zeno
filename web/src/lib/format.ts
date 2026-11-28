@@ -2,21 +2,30 @@
 // the home cards already use, and every number keeps one space before its unit.
 export const missingValue = '--'
 
+export const byteUnits = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const
+
+/**
+ * Divides a byte magnitude by 1024 until it drops below 1024 or reaches
+ * byteUnits[maxPower]. Callers keep their own rounding, sign and empty rules.
+ */
+export function scaleBytes(magnitude: number, maxPower = byteUnits.length - 1): { size: number; power: number } {
+  let size = magnitude
+  let power = 0
+  while (size >= 1024 && power < maxPower) {
+    size /= 1024
+    power += 1
+  }
+  return { size, power }
+}
+
 export function formatBytes(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return missingValue
   if (value === 0) return '0 B'
 
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
-  let size = Math.abs(value)
-  let unitIndex = 0
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024
-    unitIndex += 1
-  }
-
+  const { size, power } = scaleBytes(Math.abs(value))
   const signed = value < 0 ? -size : size
-  if (unitIndex === 0) return `${Math.round(signed)} ${units[unitIndex]}`
-  return `${signed.toFixed(1)} ${units[unitIndex]}`
+  if (power === 0) return `${Math.round(signed)} ${byteUnits[power]}`
+  return `${signed.toFixed(1)} ${byteUnits[power]}`
 }
 
 export function formatBps(value: number | null | undefined): string {
@@ -38,6 +47,11 @@ function pad2(value: number): string {
   return value.toString().padStart(2, '0')
 }
 
+/** Zero-padded local calendar date, e.g. 2026-07-29 or 2026/07/29. */
+export function formatCalendarDate(date: Date, separator = '-'): string {
+  return `${date.getFullYear()}${separator}${pad2(date.getMonth() + 1)}${separator}${pad2(date.getDate())}`
+}
+
 /** HH:mm with a zero-padded hour. */
 export function formatClock(timestamp: number | Date): string {
   const date = timestamp instanceof Date ? timestamp : new Date(timestamp)
@@ -57,5 +71,5 @@ export function formatDateTime(value: string | number | Date | null | undefined)
   if (value === null || value === undefined || value === '') return missingValue
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(date.getTime())) return typeof value === 'string' ? value : missingValue
-  return `${date.getFullYear()}/${pad2(date.getMonth() + 1)}/${pad2(date.getDate())} ${formatClock(date)}`
+  return `${formatCalendarDate(date, '/')} ${formatClock(date)}`
 }

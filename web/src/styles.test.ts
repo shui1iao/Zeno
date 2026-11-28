@@ -58,18 +58,19 @@ describe('stylesheet structure', () => {
 
 describe('notification type modal visual contract', () => {
   it('uses a stable content-height card and a title without the rule-name subtitle', () => {
-    expect(adminNotificationsSource).toContain('<AdminModal title="编辑通知类型" className="admin-alert-rule-modal"')
+    expect(adminNotificationsSource).toMatch(/<AdminFormModal\s+title="编辑通知类型"\s+modalClassName="admin-alert-rule-modal"/)
     expect(adminNotificationsSource).not.toContain('编辑通知类型 ·')
     expect(adminStyles).toMatch(/\.admin-modal\.admin-notification-channel-modal,\s*\.admin-modal\.admin-alert-rule-modal\s*\{[^}]*height: auto;[^}]*min-height: 0;[^}]*max-height: calc\(100dvh - 16px\);[^}]*\}/)
   })
 
   it('routes notification deletions through the shared async error-aware modal', () => {
     expect(adminNotificationsSource).not.toContain('window.confirm')
-    expect(adminNotificationsSource).toContain('title="删除通知类型"')
-    expect(adminNotificationsSource).toContain('hint="删除后可重新添加。"')
-    expect(adminNotificationsSource).toContain('onConfirm={() => onUpdate(pendingDelete.id, { enabled: false })}')
-    expect(adminNotificationsSource).toContain('title="删除通知渠道"')
-    expect(adminNotificationsSource).toContain('onConfirm={() => onDelete(pendingDelete.id)}')
+    // Every admin list routes deletion through the shared useAdminDeleteConfirm -> AdminDeleteConfirmModal.
+    expect(adminNotificationsSource).toContain("useAdminDeleteConfirm<AdminAlertRule>({ entityLabel: '通知类型'")
+    expect(adminNotificationsSource).toContain("hint: '删除后可重新添加。'")
+    expect(adminNotificationsSource).toContain('onConfirm: (rule) => onUpdate(rule.id, { enabled: false })')
+    expect(adminNotificationsSource).toContain("useAdminDeleteConfirm<AdminNotificationChannel>({ entityLabel: '通知渠道'")
+    expect(adminNotificationsSource).toContain('onConfirm: (channel) => onDelete(channel.id)')
   })
 })
 

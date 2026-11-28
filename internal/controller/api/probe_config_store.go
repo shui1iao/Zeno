@@ -70,7 +70,7 @@ func (s *sqliteAgentDomain) recordProbeConfigAppliedOnce(ctx context.Context, no
 	if version > currentVersion {
 		return errProbeConfigAckInvalid
 	}
-	result, err := tx.ExecContext(ctx, `
+	if err := execRequiringRows(ctx, tx, errNodeNotFound, `
 		UPDATE nodes
 		SET probe_config_applied_version = CASE
 		      WHEN COALESCE(probe_config_applied_version, 0) <= ? THEN ?
@@ -85,16 +85,8 @@ func (s *sqliteAgentDomain) recordProbeConfigAppliedOnce(ctx context.Context, no
 		      ELSE updated_at
 		    END
 		WHERE id = ? AND disabled = 0
-	`, version, version, version, nowUnix, version, nowUnix, nodeID)
-	if err != nil {
+	`, version, version, version, nowUnix, version, nowUnix, nodeID); err != nil {
 		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return errNodeNotFound
 	}
 	if err := tx.Commit(); err != nil {
 		return err

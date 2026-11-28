@@ -78,10 +78,7 @@ type sqliteAdminAlertRules struct {
 }
 
 func (s *sqliteAdminAlertRules) queryReadDB() *sql.DB {
-	if s.readDB != nil {
-		return s.readDB
-	}
-	return s.db
+	return preferredReadDB(s.readDB, s.db)
 }
 
 var retiredAdminAlertRuleIDs = []string{"probe_latency_high", "probe_loss_high", "node_recovered"}

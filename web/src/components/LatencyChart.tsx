@@ -8,7 +8,9 @@ import {
   type KulinChartRow,
   type KulinTargetSeries,
 } from '../lib/kulinLatencyChart'
-import { formatClock, formatLatency, formatPercent, formatTooltipDateTime } from '../lib/format'
+import { formatLatency, formatPercent, formatTooltipDateTime } from '../lib/format'
+import { finiteOrNull } from '../lib/number'
+import { formatAxisTime as formatSpanAxisTime, svgPointerX } from '../lib/resourceChart'
 import { latencySeriesColor as paletteColor } from '../lib/seriesColors'
 import { OverlaySurface } from './OverlaySurface'
 
@@ -182,14 +184,9 @@ export function LatencyChart({
   }
 
   const handleHoverMove = (event: ReactMouseEvent<SVGRectElement>) => {
-    const svg = event.currentTarget.ownerSVGElement
-    const ctm = svg?.getScreenCTM()
-    if (!svg || !ctm) return
-    const point = svg.createSVGPoint()
-    point.x = event.clientX
-    point.y = event.clientY
-    const svgPoint = point.matrixTransform(ctm.inverse())
-    setActiveHoverColumn(hoverColumnForSvgX(svgPoint.x))
+    const svgX = svgPointerX(event.currentTarget, event.clientX, event.clientY)
+    if (svgX === null) return
+    setActiveHoverColumn(hoverColumnForSvgX(svgX))
   }
 
   return (
@@ -540,8 +537,7 @@ function formatYAxisValue(value: number): string {
 }
 
 function rowNumber(row: KulinChartRow, key: string): number | null {
-  const value = row[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  return finiteOrNull(row[key])
 }
 
 interface HoverPoint {
@@ -731,12 +727,7 @@ export function pruneCollidingAxisTicks(
 }
 
 function formatAxisTime(createdAt: number, timestamps: number[]): string {
-  const date = new Date(createdAt)
-  if (Number.isNaN(date.getTime())) return '--:--'
   const start = timestamps[0] ?? createdAt
   const end = timestamps.at(-1) ?? createdAt
-  const spanHours = (end - start) / 3_600_000
-  const time = formatClock(date)
-  if (spanHours > 36) return `${date.getMonth() + 1}/${date.getDate()} ${time}`
-  return time
+  return formatSpanAxisTime(createdAt, end - start)
 }
